@@ -1,201 +1,329 @@
-# modify_dem.py
-# 1. analysis.py
-## 1.1 analyze_two_dems
-对比两个DEM之间的差异，通过P检验等方式；这里主要是对比超分后的DEM和原始DEM之间的差异
-# 2. clean_nodata.py
-## 2.1 remove_nodata_rows_cols
-当前使用场景：使用地理坐标系、非投影坐标系的DEM，且要去除的DEM是周围有多余的NoData的数据
+<div id="top"></div>
 
-| None | None | None | None | 
-|------|------|------|------|
-| 1    | 1    | 1    | None |
-| 1    | 1    | 1    | None |
+<!-- PROJECT LOGO -->
+<br />
 
-但是下面的场景会出错：
+<div>
+  <h3 align="center">OperationOfArcGIS</h3>
 
-| None | None | None | None | 
-|------|------|------|------|
-| 1    | 1    | 1    | None |
-| None | None | None | None |
-| 1    | 1    | 1    | None |
+  <p align="center">
+    Various utility modules used in processing Digital Elevation Models (DEMs) and Remote Sensing
+    <br />
+    <a href="https://github.com/isKunner/DEMAndRemoteSensingUtilse">Kevin Chen</a>
+  </p>
+</div>
 
-## 2.2 相关知识
-Affine：仿射变换
-以王茂沟DEM数据（投影坐标系）为例：
 
-Affine(a=2.0, b=0.0, c=440820.09892957023, d=0.0, e=-2, f=4165146.2840191615, g=0.0, h=0.0, i=1.0)
+## 1. analysis.py
 
-| 参数 | 	含义     | 	说明                       |
-|----|---------|---------------------------|
-| a  | 	x方向缩放	 | 经度/投影X 的列方向变化率            |
-| b  | 	x-y旋转  | 	经度/投影X 的行方向变化率           |
-| c  | 	x方向平移  | 	左上角x坐标                   |
-| d  | 	y-x旋转  | 	纬度/投影Y 的列方向变化率           |
-| e  | 	y方向缩放  | 	纬度/投影Y 的行方向变化率（负值表示图像向下） |
-| f  | 	y方向平移  | 	左上角y坐标                   |
-| g  | 	透视变换x  | 	固定为0                     |
-| h  | 	透视变换y  | 	固定为0                     |
-| i  | 	缩放因子   | 	固定为1                     |
+### 1.1. `analyze_two_dems`
 
-坐标系的运算：\
-x_geo = a × col + b × row + c \
-y_geo = d × col + e × row + f
+*   **Function**: Compares the differences between two DEMs using statistical methods like the P-test.
+*   **Primary Use Case**: Comparing a super-resolved DEM with its original counterpart.
 
-坐标系的矩阵运算公式：
-$$
-\begin{pmatrix}
-a & b & c \\
-d & e & f \\
-g & h & i
-\end{pmatrix}
-\times
-\begin{pmatrix}
-x_{\text{pixel}} \\
-y_{\text{pixel}} \\
-1
-\end{pmatrix}
-=
-\begin{pmatrix}
-x_{\text{geo}} \\
-y_{\text{geo}} \\
-1
-\end{pmatrix}
-$$
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-# 3. coordinate_system
-## 3.1 create_coordinate_transformer
-创建一个可靠的坐标转换对象，用于获取一个在A坐标系下（A数据）的点的数据，在B坐标系（数据）下的点的位置\
-核心思想：已有的位置->获取经纬度坐标->得到在另一个坐标系下的位置
+## 2. clean_nodata.py
 
-| 源坐标系  | 	目标坐标系 | 	支持情况   | 	处理方式          |
-|-------|--------|---------|----------------|
-| 地理坐标系 | 	WGS84 | 	✅ 直接支持 | 	直接转换          |
-| 投影坐标系 | 	WGS84 | 	✅ 直接支持 | 	直接转换          |
-| 地理坐标系 | 	投影坐标系 | 	✅ 间接支持 | 	通过WGS84中转     |
-| 投影坐标系 | 	地理坐标系 | 	✅ 间接支持 | 	通过WGS84中转     |
-| 地理坐标系 | 	地理坐标系 | 	✅ 直接支持 | 	直接转换          |
-| 投影坐标系 | 	投影坐标系 | 	✅ 条件支持 | 	同基准面直连，异基准面中转 |
+### 2.1. `remove_nodata_rows_cols`
 
-# 4. crop_dem_from_cordinate.py
-## 4.1 add_buffer_to_bounds
-这个应用的场景：比如超分，超分后由于边缘的像素缺失效果不好，所以额外增加一个缓冲，超分后直接裁掉边缘
+*   **Function**: Removes excess rows and columns containing only NoData values from the edges of a DEM.
+*   **Current Use Case**: Works with DEMs in a geographic coordinate system (non-projected) where the target data area is surrounded by NoData padding.
+*   **Example (Works)**:
+    ```
+    | None | None | None | None |
+    |------|------|------|------|
+    | 1    | 1    | 1    | None |
+    | 1    | 1    | 1    | None |
+    ```
+*   **Example (Fails/May Produce Incorrect Results)**:
+    ```
+    | None | None | None | None |
+    |------|------|------|------|
+    | 1    | 1    | 1    | None |
+    | None | None | None | None |
+    | 1    | 1    | 1    | None |
+    ```
 
-⚠️ 但其实这个裁剪的话，有问题，如果对多个块进行缓冲区的添加，他们的实际范围会不一样，因为是按照固定的赤道大小进行的经纬度计算，但可能实际位置会有变化，那么经纬度对应的实际距离有不同
-- 如果数据本身是地理坐标系，如果裁剪的块的经纬度跨度都相同，那么扩展后还是一样的（在经纬度数值上），但实际的地理距离不同
-- 如果数据本身是投影坐标系，由于是输入的经纬度，并且拿经纬度计算的，所以裁剪的区域不一样，仍需完善
+### 2.2. Related Knowledge: Affine Transform
 
-## 4.2 crop_tif_by_bounds
-| 根据给定的矩形框的范围进行数据的裁剪                                                                                |
-|---------------------------------------------------------------------------------------------------|
-| 输入参数:<br/>lon_min=110.347, lat_min=37.595<br/>lon_max=110.348, lat_max=37.596                     |
-| 创建WGS84几何形状:<br/>Polygon([(110.347,37.595), (110.348,37.595), ...])                               |
-| 读取TIF文件:<br/>坐标系: EPSG:4527 (投影坐标系)<br/>Affine: a=2.0, e=-2.0, c=440000, f=4166000                |
-| 自动坐标转换:<br/>(110.347,37.595) → (440820.1, 4165146.3)<br/>(110.348,37.596) → (440822.1, 4165148.3) |
-| 像素坐标计算:<br/>列: 410~411<br/>行: 425~426                                                             |
-| 提取像素数据:<br/>out_image.shape = (1, 1, 1)  提取1×1个像素                                                 |
-| 生成新变换矩阵:<br/>新左上角: (440820.0, 4165148.0)                                                          |
-| 保存文件:<br/>输出裁剪后的小TIF文件                                                                            |
+*   **Description**: An affine transformation matrix defines how pixel coordinates map to geographic/projected coordinates.
+*   **Example (Wangmaogou DEM - Projected Coordinate System)**:
+    ```python
+    Affine(a=2.0, b=0.0, c=440820.09892957023,
+           d=0.0, e=-2, f=4165146.2840191615,
+           g=0.0, h=0.0, i=1.0)
+    ```
+*   **Parameter Meanings**:
 
-# 5. crop_dem_from_dem.py
-## 5.1 extract_matching_files
-根据已有的裁剪好的tif进行重新的裁剪采样(方形)
-匹配到要裁剪的目标坐标系，作为区域划分的数据的坐标系不用管，会自动转换
+    | Param | Meaning         | Description                                               |
+    | :---- | :-------------- | :-------------------------------------------------------- |
+    | a     | X Scale         | Column-wise change rate for longitude/X projected coord.  |
+    | b     | X-Y Rotation    | Row-wise change rate for longitude/X projected coord.     |
+    | c     | X Translation   | Top-left corner X coordinate.                             |
+    | d     | Y-X Rotation    | Column-wise change rate for latitude/Y projected coord.   |
+    | e     | Y Scale         | Row-wise change rate for latitude/Y projected coord. (Negative means image goes down) |
+    | f     | Y Translation   | Top-left corner Y coordinate.                             |
+    | g     | Perspective X   | Fixed at 0.                                               |
+    | h     | Perspective Y   | Fixed at 0.                                               |
+    | i     | Scaling Factor  | Fixed at 1.                                               |
 
-# 6. get_flow_accumulation.py
-## 6.1 calculate_flow_accumulation
+*   **Coordinate Transformation Equations**:
+    *   Pixel -> Geo:
+        ```
+        x_geo = a * col + b * row + c
+        y_geo = d * col + e * row + f
+        ```
+    *   Matrix Form:
+        $$
+        \begin{pmatrix}
+        a & b & c \\
+        d & e & f \\
+        g & h & i
+        \end{pmatrix}
+        \times
+        \begin{pmatrix}
+        x_{\text{pixel}} \\
+        y_{\text{pixel}} \\
+        1
+        \end{pmatrix}
+        =
+        \begin{pmatrix}
+        x_{\text{geo}} \\
+        y_{\text{geo}} \\
+        1
+        \end{pmatrix}
+        $$
 
-参考的AI的代码，对具体的功能效果，并不是很确定
-- 原始DEM
-- 第一阶段填洼 (fill_depressions)
-- 第二阶段填洼 (fill_depressions)  
-- 第一阶段削峰 (breach_depressions)
-- 第二阶段削峰 (breach_depressions)
-- 流向计算 (d8_pointer)
-- 汇流累积计算 (d8_flow_accumulation)
-- 输出结果
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-[Whitebox Geospatial Analysis Tools (Whitebox GAT) 是一个强大的开源地理空间分析平台](https://www.whiteboxgeo.com/manual/wbt_book/intro.html)
-- 地形分析常用工具：
-    - wbt.slope()              # 坡度计算
-  - wbt.aspect()             # 坡向计算
-  - wbt.curvature()          # 曲率分析
-  - wbt.ruggedness()         # 地形粗糙度
-  - wbt.tpi()                # 地形位置指数
-- 水文分析常用工具：
-  - wbt.fill_depressions()   # 填洼处理
-  - wbt.breach_depressions() # 削峰处理
-  - wbt.d8_pointer()         # D8流向计算
-  - wbt.d8_flow_accumulation() # D8汇流累积
-  - wbt.watershed()          # 流域划分
-- 图像处理常用工具
-  - wbt.resample()           # 重采样
-  - wbt.clip_raster_to_polygon() # 裁剪
-  - wbt.mosaic()             # 影像镶嵌
-  - wbt.change_vector_analysis() # 变化向量分析
+## 3. coordinate_system
 
-# 7. get_information.py
-## 7.1 get_pixel_size_accurate
-计算栅格像元的实际大小（米）
-- 情况1：投影坐标系 → 直接读取
-- 情况2：地理坐标系 → 转换到UTM计算实际距离
-## 7.2 get_tif_latlon_bounds
-获取TIF文件的经纬度坐标范围
-- 情况1：地理坐标系 → 直接读取
-- 情况2：投影坐标系 → 转换到WGS计算经纬度
-## 7.3 get_crs_transformer
-创建两个坐标系之间的转换器
-transformer = get_crs_transformer("EPSG:4326", "EPSG:32650")
-lon, lat = 110.0, 35.0
-x, y = transformer.transform(lon, lat)
-## 7.4 geo_to_pixel
-将经纬度转换为图像像素坐标
-## 7.5 pixel_to_geo
-将像素坐标转换为经纬度
+### 3.1. `create_coordinate_transformer`
 
-# 8. resize_dem.py
-## 8.1 unify_dem
-将输入DEM统一到目标DEM的分辨率和坐标系（支持多波段），同时还有缓冲区
-可能因为：
-浮点数精度误差：坐标计算中的微小误差，可能导致列数出现变化
+*   **Function**: Creates a robust coordinate transformation object to convert a point's location from Coordinate System A to Coordinate System B.
+*   **Core Idea**: Source Location -> Get WGS84 Lat/Lon -> Get Location in Target Coordinate System.
+*   **Support Matrix**:
 
-- 重采样算法：双线性插值可能在边界产生轻微偏差
-- 像素对齐问题：新旧坐标系的像素边界不完全对齐
-- 存在请问的不整齐，不过认为不影响大体的计算等
+    | Source CRS | Target CRS | Support Status | Handling Method                           |
+    |:-----------|:-----------|:---------------|:------------------------------------------|
+    | Geographic | WGS84      | ✅ Direct       | Direct Transformation                     |
+    | Projected  | WGS84      | ✅ Direct       | Direct Transformation                     |
+    | Geographic | Projected  | ✅ Indirect     | Via WGS84 Intermediate Step               |
+    | Projected  | Geographic | ✅ Indirect     | Via WGS84 Intermediate Step               |
+    | Geographic | Geographic | ✅ Direct       | Direct Transformation                     |
+    | Projected  | Projected  | ✅ Conditional  | Direct if same datum, otherwise via WGS84 |
 
-## 8.2 resample_to_target_resolution
-简单重采样函数（适用于投影坐标系），输入想要的分辨率大小：m
+Additional Features:
+- Automatically detects CRS type (geographic vs projected) and datum.
+- Validates coordinate systems using OSR authority information.
+- Performs sanity checks on test points to ensure transformation validity.
+- Falls back to a two-step WGS84 intermediate conversion when direct transformation fails or datums differ.
+- Issues warnings for potential accuracy loss (e.g., geographic CRS with different datums).
+- Returns both the target CRS object and a unified transformation function: `transform_func(x, y, z=0) -> (tx, ty)`.
 
-## 8.3 resample_geography_to_target_resolution
-重采样函数，可以从地理坐标系转换为投影坐标系后再进行重采样\
-⚠️ 目前匹配不齐，可能是数据源的问题
+### 3.2. `get_shp_wgs84_bounds`
+Function: Reads a Shapefile and returns its bounding box in WGS84 (EPSG:4326) longitude/latitude coordinates.
+Input: Path to a valid Shapefile (`.shp`).
+Output: `(lon_min, lat_min, lon_max, lat_max)` as floats.
+Behavior:
+- Raises `FileNotFoundError` if the Shapefile does not exist.
+- Raises `ValueError` if the file is empty or lacks CRS information.
+- Automatically reprojects to EPSG:4326 if the original CRS is not WGS84.
+- Ensures output bounds are always in geographic coordinates suitable for functions expecting latitude/longitude (e.g., `crop_tif_by_bounds`).
 
-# 9. splicing_dem.py
-## 9.1 merge_georeferenced_tifs
-- 将同一坐标系下，且Nodata等配置都要相同的多个 GeoTIFF 文件拼接成一个大的 GeoTIFF 文件，并处理重叠区域
-- 整体思路是找出需要拼接的文件的范围，创建一个大的数组，然后把每个文件填充进去，且每次填充计数，以方便后面平滑
-- 考虑了 NoData: 尝试处理源数据的 NoData 值，避免将其计入计算（尤其是在 mean 策略下）
-- 计算全局边界和变换: 正确地计算了拼接后图像的地理范围、尺寸和仿射变换矩阵
-- ⚠️ global_width 和 global_height 的计算: 使用 int(round(...)) 来计算最终图像的尺寸。这通常是合理的，但如果源文件的边界和分辨率之间存在微小的不匹配（浮点精度问题），可能会导致最终尺寸略有偏差。虽然 rasterio 通常能很好地处理这种情况，但在极端情况下仍需留意
-- ⚠️ 前代码使用 ds.read() 一次性读取了整个源文件的数据。对于大型文件，这会消耗大量内存
+### 3.3. `transform_coordinates`
+*   **Function**: Executes coordinate transformation using a transformer function returned by `create_coordinate_transformer`.
+*   **Purpose**: : Provides a safe, error-handled wrapper for point-wise conversion.
+Usage:
+    ```python
+    target_crs, transformer = create_coordinate_transformer(src_srs, target_srs)
+    tx, ty = transform_coordinates(transformer, x, y)
+    ```
 
-# 10. split_dem.py
-## 10.1 split_tif
-- 实现了基于 step = tile_size - overlap 的滑动窗口逻辑来创建重叠
-- NoData 处理（初步）: 尝试跳过所有像素都是 NoData 或 NaN 的瓦片，这是一个很好的优化，避免生成无意义的文件
-- 目前只能处理单波段
+<p align="right">(<a href="#top">back to top</a>)</p>
 
-# 11. utils.py
-## 11.1 read_tif
-成功读取了常用的栅格数据属性：像元值、仿射变换、坐标系、NoData 值
+## 4. crop_dem_from_cordinate.py
 
-## 11.2 write_tif
-输入参数涵盖了写入 GeoTIFF 所需的核心信息
+### 4.1. `add_buffer_to_bounds`
 
-## get_counters_by_value:
-首先获取矩形中的所有类别，并分类别获取矩形，然后获取识别结果的拓展矩形，包括：{key=矩形类型, value=(矩形四点坐标，宽和长，中心坐标，矩形面积)}
-调用函数：get_outline
-## get_outline
-获取矩形的外接矩形
-调用函数：anti_aliasing
-## anti_aliasing
-消除分类别中的矩形块，防止出现问题
+*   **Function**: Adds a buffer zone around a given bounding box defined by latitude/longitude coordinates.
+*   **Use Case Example**: Super-resolution often degrades edge pixels; cropping a larger area with a buffer allows trimming poor-quality edges after processing.
+*   **⚠️ Important Caveat**:
+    *   Buffers added to multiple tiles may result in inconsistent real-world areas due to varying ground distances per degree of longitude/latitude.
+        *   **Geographic CRS**: Tile spans might be equal in degrees but differ in actual meters.
+        *   **Projected CRS**: Calculations based on input lat/lon can lead to inconsistent cropped areas; further refinement needed.
+
+### 4.2. `crop_tif_by_bounds`
+
+*   **Function**: Crops a TIFF file based on a specified rectangular bounding box.
+*   **Example Workflow**:
+    ```
+    Input Parameters:
+    lon_min=110.347, lat_min=37.595
+    lon_max=110.348, lat_max=37.596
+
+    1. Create WGS84 Geometry:
+       Polygon([(110.347,37.595), (110.348,37.595), ...])
+
+    2. Read TIF File:
+       CRS: EPSG:4527 (Projected)
+       Affine: a=2.0, e=-2.0, c=440000, f=4166000
+
+    3. Automatic Coordinate Transformation:
+       (110.347,37.595) → (440820.1, 4165146.3)
+       (110.348,37.596) → (440822.1, 4165148.3)
+
+    4. Calculate Pixel Coordinates:
+       Columns: 410 ~ 411
+       Rows: 425 ~ 426
+
+    5. Extract Pixel Data:
+       out_image.shape = (1, 1, 1)  // Extracts 1x1 pixel(s)
+
+    6. Generate New Transform Matrix:
+       New Top-Left Corner: (440820.0, 4165148.0)
+
+    7. Save File:
+       Outputs the cropped small TIF file
+    ```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 5. crop_dem_from_dem.py
+
+### 5.1. `extract_matching_files`
+
+*   **Function**: Resamples and crops a target file based on the extent and properties of an already cropped reference TIFF file (ensuring a square output).
+*   **Feature**: Automatically handles coordinate system transformations; the coordinate system of the reference file dictates the output area/crs.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 6. get_flow_accumulation.py
+
+### 6.1. `calculate_flow_accumulation`
+
+*   **Function**: Calculates flow accumulation for a DEM.
+*   **Workflow (Based on Whitebox GAT concepts)**:
+    1.  Original DEM
+    2.  First Pass Depression Filling (`fill_depressions`)
+    3.  Second Pass Depression Filling (`fill_depressions`)
+    4.  First Pass Depression Breaching (`breach_depressions`)
+    5.  Second Pass Depression Breaching (`breach_depressions`)
+    6.  Flow Direction Calculation (`d8_pointer`)
+    7.  Flow Accumulation Calculation (`d8_flow_accumulation`)
+    8.  Output Result
+*   **Related Resource**:
+    *   [Whitebox Geospatial Analysis Tools (Whitebox GAT)](https://www.whiteboxgeo.com/manual/wbt_book/intro.html)
+    *   **Common Terrain Tools**: `slope`, `aspect`, `curvature`, `ruggedness`, `tpi`
+    *   **Common Hydrological Tools**: `fill_depressions`, `breach_depressions`, `d8_pointer`, `d8_flow_accumulation`, `watershed`
+    *   **Common Image Processing Tools**: `resample`, `clip_raster_to_polygon`, `mosaic`, `change_vector_analysis`
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 7. get_information.py
+
+### 7.1. `get_pixel_size_accurate`
+
+*   **Function**: Calculates the accurate physical size of a raster pixel in meters.
+*   **Logic**:
+    *   **Case 1 (Projected CRS)**: Read directly from transform parameters.
+    *   **Case 2 (Geographic CRS)**: Transform to UTM (or similar) and calculate the actual ground distance.
+
+### 7.2. `get_tif_latlon_bounds`
+
+*   **Function**: Retrieves the bounding box of a TIFF file expressed in WGS84 Latitude/Longitude coordinates.
+*   **Logic**:
+    *   **Case 1 (Geographic CRS)**: Read directly.
+    *   **Case 2 (Projected CRS)**: Transform extents to WGS84.
+
+### 7.3. `get_crs_transformer`
+
+*   **Function**: Creates a transformer object for converting coordinates between two specific Coordinate Reference Systems.
+*   **Example**:
+    ```python
+    transformer = get_crs_transformer("EPSG:4326", "EPSG:32650")
+    lon, lat = 110.0, 35.0
+    x, y = transformer.transform(lon, lat)
+    ```
+
+### 7.4. `geo_to_pixel`
+
+*   **Function**: Converts geographic coordinates (lat/lon) to image pixel coordinates (row, col).
+
+### 7.5. `pixel_to_geo`
+
+*   **Function**: Converts image pixel coordinates (row, col) to geographic coordinates (lat/lon).
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 8. resize_dem.py
+
+### 8.1. `unify_dem`
+
+*   **Function**: Unifies an input DEM to match the resolution and coordinate system of a target DEM (supports multi-band). Can also add a buffer.
+*   **Potential Issues**:
+    *   Floating-point precision errors during coordinate calculations might cause slight variations in column/row counts.
+    *   Resampling algorithms (e.g., bilinear) might introduce minor deviations at boundaries.
+    *   Pixel alignment issues between old and new coordinate systems.
+*   **Note**: Minor irregularities might exist but are generally considered negligible for overall calculations.
+
+### 8.2. `resample_to_target_resolution`
+
+*   **Function**: Simple resampling function suitable for projected coordinate systems. Takes desired resolution in meters as input.
+
+### 8.3. `resample_geography_to_target_resolution`
+
+*   **Function**: Resamples a DEM, potentially transforming from a geographic coordinate system to a projected one before resampling.
+*   **⚠️ Warning**: Currently experiencing misalignment issues, possibly due to source data characteristics.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 9. splicing_dem.py
+
+### 9.1. `merge_georeferenced_tifs`
+
+*   **Function**: Mosaics multiple GeoTIFF files into a single large GeoTIFF, handling overlapping regions. Requires identical coordinate systems, NoData values, etc.
+*   **Implementation Approach**:
+    1.  Determine the overall extent of all files to be merged.
+    2.  Create a large empty array.
+    3.  Populate the array with data from each file, keeping count of overlaps for potential averaging.
+*   **Key Considerations**:
+    *   **NoData Handling**: Attempts to manage source NoData values to prevent them from affecting calculations (especially in 'mean' strategy).
+    *   **Global Bounds & Transform**: Correctly calculates the final mosaic's geographic extent, dimensions, and affine transform matrix.
+    *   **⚠️ Dimension Calculation**: Uses `int(round(...))`. While usually fine, floating-point precision mismatches might cause slight dimension discrepancies.
+    *   **⚠️ Memory Usage**: Current code uses `ds.read()` to load entire source files at once, which can consume significant memory for large files.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 10. split_dem.py
+
+### 10.1. `split_tif`
+
+*   **Function**: Splits a large DEM TIFF file into smaller tiles.
+*   **Implementation Details**:
+    *   Implements a sliding window logic based on `step = tile_size - overlap` to create overlaps.
+    *   **NoData Handling (Initial)**: Attempts to skip tiles where all pixels are NoData or NaN, optimizing by avoiding creation of meaningless files.
+*   **Limitation**: Currently supports only single-band rasters.
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+## 11. utils.py
+
+### 11.1. `read_tif`
+
+*   **Function**: Successfully reads common raster attributes: pixel values, affine transform, coordinate reference system, and NoData value.
+
+### 11.2. `write_tif`
+
+*   **Function**: Writes data to a GeoTIFF file using provided core information (data, transform, crs, nodata, etc.).
+
+### 11.3. `pixel_to_geo_coords`
+
+*   **Function**: This function converts pixel coordinates to geographic coordinates using GDAL's geotransform parameters.`.
+
+### 11.4. `get_geotransform_and_crs`
+
+*   **Function**: Get geotransform and CRS information from a TIFF file.
+
+<p align="right">(<a href="#top">back to top</a>)</p>

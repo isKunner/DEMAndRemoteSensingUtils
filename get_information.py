@@ -76,8 +76,9 @@ def get_pixel_size_accurate(raster_path, is_print=False):
         return pixel_size_m_x, pixel_size_m_y
 
 def get_tif_latlon_bounds(tif_path):
-    logger = LoggerManager.get_logger()
+
     """获取TIFF文件的经纬度坐标范围（无论原坐标系如何）"""
+    logger = LoggerManager.get_logger()
     with rasterio.open(tif_path) as src:
         bounds = src.bounds  # 原始坐标范围，格式为(left, bottom, right, top)
         src_crs = src.crs  # 原始坐标系
@@ -95,17 +96,58 @@ def get_tif_latlon_bounds(tif_path):
             right, top = transformer.transform(bounds.right, bounds.top)
             latlon_bounds = (left, bottom, right, top)
 
-        # print(f"原始坐标系: {src_crs}")
-        # print(f"原始坐标范围 (left, bottom, right, top): {bounds}")
         logger.info(f"经纬度范围 (lon_min, lat_min, lon_max, lat_max): {latlon_bounds}")
         return latlon_bounds
 
 def get_crs_transformer(src_crs, dst_crs="EPSG:4326"):
-    """创建坐标参考系转换器"""
+
+    """
+    Create a coordinate reference system (CRS) transformer for converting coordinates between two CRS.
+
+    This function creates a pyproj.Transformer object that can transform coordinates from
+    source coordinate system to destination coordinate system. It handles both string-based
+    EPSG codes and pyproj.CRS objects as inputs.
+
+    # Example 1: Create transformer from WGS84 to UTM Zone 49N
+    transformer = get_crs_transformer("EPSG:4326", "EPSG:32649")
+
+    # Input coordinates (Beijing, China in WGS84)
+    lon, lat = 116.3975, 39.9085
+
+    # Transform to UTM coordinates
+    if transformer:
+        x, y = transformer.transform(lon, lat)
+        print(f"Input (WGS84): {lon}, {lat}")
+        print(f"Output (UTM Zone 49N): {x:.2f}, {y:.2f}")
+        # Output: Input (WGS84): 116.3975, 39.9085
+        #         Output (UTM Zone 49N): 437000.00, 4410000.00
+
+    # Example 2: Create transformer from UTM to WGS84
+    transformer2 = get_crs_transformer("EPSG:32649", "EPSG:4326")
+
+    # Input UTM coordinates
+    utm_x, utm_y = 437000.00, 4410000.00
+
+    # Transform back to geographic coordinates
+    if transformer2:
+        lon2, lat2 = transformer2.transform(utm_x, utm_y)
+        print(f"Input (UTM Zone 49N): {utm_x}, {utm_y}")
+        print(f"Output (WGS84): {lon2:.4f}, {lat2:.4f}")
+        # Output: Input (UTM Zone 49N): 437000.00, 4410000.00
+        #         Output (WGS84): 116.3975, 39.9085
+
+    # Example 3: Same CRS - returns None
+    transformer3 = get_crs_transformer("EPSG:4326", "EPSG:4326")
+    print(transformer3)  # Output: None
+
+    :param src_crs: Source coordinate reference system (can be EPSG code string or pyproj.CRS object)
+    :param dst_crs: Destination coordinate reference system (default: "EPSG:4326" for WGS84 geographic)
+    :return: pyproj.Transformer object if CRS systems are different, None if they are identical
+    """
+
     if src_crs == dst_crs:
         return None
 
-    # 确保输入是正确的CRS格式
     if isinstance(src_crs, str):
         src_crs = pyproj.CRS(src_crs)
     if isinstance(dst_crs, str):
@@ -113,57 +155,99 @@ def get_crs_transformer(src_crs, dst_crs="EPSG:4326"):
 
     return Transformer.from_crs(src_crs, dst_crs, always_xy=True)
 
-def geo_to_pixel(src, lon, lat, is_cv=False):
+def geo_to_pixel(target_src, lon, lat, is_cv: bool=False, input_src: str="EPSG:4326"):
+
+    """
+    Convert geographic coordinates to pixel coordinates in the source raster
+    Handles both geographic and projected coordinate systems automatically.
+
+    :param target_src: rasterio dataset object
+    :param lon: longitude in WGS84 coordinate system
+    :param lat: latitude in WGS84 coordinate system  
+    :param is_cv: if True, returns (col, row) for OpenCV; if False, returns (row, col) for numpy/PIL
+        When is_cv=False (default): Returns coordinates in (row, col) format, which is used by numpy arrays and PIL images
+        When is_cv=True: Returns coordinates in (col, row) format, which is used by OpenCV
+    :param input_src: source coordinate reference system of input coordinates (default: "EPSG:4326" for WGS84 geographic) Can be EPSG code string or pyproj.CRS object
+    :return: pixel coordinates (row, col) or (col, row) depending on is_cv flag
+    """
+
     logger = LoggerManager.get_logger()
-    """
-    将经纬度(WGS84)转换为大DEM中的像素坐标
 
-    cv2是(cols, rows)，PIL.image和np.array是(rows, cols)
-    """
-    # 获取大DEM的坐标参考系
-    large_crs = src.crs
+    # Get the coordinate reference system of the source raster
+    target_crs = target_src.crs
 
-    # 如果大DEM不是WGS84，将经纬度转换为大DEM的投影坐标
-    if large_crs.to_string() != "EPSG:4326":
-        transformer = get_crs_transformer("EPSG:4326", large_crs)
+    # Transform WGS84 coordinates to the source raster's coordinate system
+    if target_crs.to_string() != input_src:
+        transformer = get_crs_transformer(input_src, target_crs)
         if transformer:
-            proj_x, proj_y = transformer.transform(lon, lat)
+            target_x, target_y = transformer.transform(lon, lat)
         else:
-            proj_x, proj_y = lon, lat
+            target_x, target_y = lon, lat
     else:
-        proj_x, proj_y = lon, lat
-    row, col = rowcol(src.transform, proj_x, proj_y)
+        target_x, target_y = lon, lat
 
-    logger.info(f"投影坐标: {proj_x}, {proj_y} → 像素坐标: {col}, {row}")
+    # Convert coordinates to pixel positions
+    row, col = rowcol(target_src.transform, target_x, target_y)
+
+    logger.info(f"Source CRS: {target_crs.to_string()} - Input coordinates: ({lon}, {lat}) → Target coordinates: ({target_x}, {target_y}) → Pixel coordinates: ({col}, {row})")
 
     if is_cv:
         return col, row
 
-    return row, col  # 交换row和col的顺序
+    return row, col
 
-def pixel_to_geo(src, row, col):
+def pixel_to_geo(input_src, row, col, target_src: str= "EPSG:4326"):
     logger = LoggerManager.get_logger()
     """
-    将像素坐标转换为经纬度(WGS84)
-    输入：col（像素列坐标）, row（像素行坐标）
-    返回：(lon, lat)（经度，纬度），严格遵循地理坐标顺序
+    Convert pixel coordinates to geographic coordinates (longitude, latitude)
+    
+    Handles both geographic and projected source coordinate systems automatically.
+    
+    :param src: rasterio dataset object
+    :param row: pixel row coordinate
+    :param col: pixel column coordinate
+    :param target_src: target coordinate reference system (default: "EPSG:4326" for WGS84 geographic)
+    :return: tuple of (longitude, latitude) in target coordinate system
     """
-    # 获取原始坐标参考系
-    src_crs = src.crs
+    # Get the source coordinate reference system
+    src_crs = input_src.crs
 
-    # 计算投影坐标（输入为像素列、行）
-    proj_x, proj_y = src.transform * (col, row)
+    # Calculate coordinates in the source's coordinate system (could be geographic or projected)
+    coord_x, coord_y = input_src.transform * (col, row)
 
-    # 转换为WGS84经纬度
-    if src_crs.to_string() == "EPSG:4326":
-        lon, lat = proj_x, proj_y  # 直接对应(lon, lat)
+    # Transform to target geographic coordinates
+    if src_crs.to_string() == target_src:
+        lon, lat = coord_x, coord_y  # Already in target coordinates
     else:
-        transformer = get_crs_transformer(src_crs, "EPSG:4326")
+        transformer = get_crs_transformer(src_crs, target_src)
         if transformer:
-            lon, lat = transformer.transform(proj_x, proj_y)  # 转换后为(lon, lat)
+            lon, lat = transformer.transform(coord_x, coord_y)  # Transform from source to target
         else:
-            lon, lat = proj_x, proj_y  # 降级处理，仍保持返回格式
+            lon, lat = coord_x, coord_y  # Fallback handling
 
-    logger.info(f"像素坐标: {col}, {row} → 投影坐标: {proj_x}, {proj_y} → 经纬度: {lon}, {lat}")
+    logger.info(f"Source CRS: {src_crs.to_string()} - Target CRS: {target_src} - Pixel coordinates: ({col}, {row}) → Source coordinates: ({coord_x}, {coord_y}) → Target coordinates: ({lon}, {lat})")
 
-    return lon, lat  # 明确返回(经度, 纬度)
+    return lon, lat  # Always return coordinates in target system
+
+def pixel_to_pixel(src, row, col, target_src, is_cv: bool = False):
+    """
+    Convert pixel coordinates from source raster to pixel coordinates in target raster
+
+    This function combines pixel_to_geo and geo_to_pixel to enable direct pixel-to-pixel
+    coordinate transformation between two rasters with different coordinate systems.
+
+    :param src: Source rasterio dataset object (for input pixel coordinates)
+    :param row: Source pixel row coordinate
+    :param col: Source pixel column coordinate
+    :param target_src: Target rasterio dataset object (for output pixel coordinates)
+    :param is_cv: if True, returns (col, row) for OpenCV; if False, returns (row, col) for numpy/PIL
+    :return: pixel coordinates (row, col) or (col, row) depending on is_cv flag in target raster
+    """
+
+    # Step 1: Convert source pixel coordinates to geographic coordinates
+    lon, lat = pixel_to_geo(src, row, col)
+
+    # Step 2: Convert geographic coordinates to target raster pixel coordinates
+    target_coords = geo_to_pixel(target_src, lon, lat, is_cv=is_cv)
+
+    return target_coords

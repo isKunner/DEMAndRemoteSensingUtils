@@ -4,9 +4,31 @@
 # @Time    : 2025/8/10 13:47
 # @Author  : Kevin
 # @Describe: 地理坐标系的处理工具
-
+import os
+import geopandas as gpd
 from osgeo import osr
-import numpy as np
+
+def get_shp_bounds(shp_path: str):
+    """
+    读取 Shapefile 并返回其在 WGS84 (EPSG:4326) 下的边界范围（经纬度）。
+
+    Returns:
+        tuple: (lon_min, lat_min, lon_max, lat_max)
+    """
+    if not os.path.exists(shp_path):
+        raise FileNotFoundError(f"Shapefile 不存在: {shp_path}")
+
+    gdf = gpd.read_file(shp_path)
+    if gdf.empty:
+        raise ValueError("Shapefile 为空，无法获取范围。")
+
+    if gdf.crs != "EPSG:4326":
+        if gdf.crs is None:
+            raise ValueError("Shapefile 缺少 CRS 信息，无法安全转换到 WGS84。")
+        gdf = gdf.to_crs("EPSG:4326")
+
+    bounds = gdf.total_bounds
+    return float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])
 
 
 def create_coordinate_transformer(src_srs, target_srs=None):

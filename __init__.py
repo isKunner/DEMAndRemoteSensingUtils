@@ -6,7 +6,9 @@
 # @Describe:
 
 from .crop_dem_from_dem import extract_matching_files
-from .utils import read_tif, write_tif
+from .utils import read_tif, write_tif, pixel_to_geo_coords, get_geotransform_and_crs, calculate_meters_per_degree_precise
 from .crop_dem_from_cordinate import crop_tif_by_bounds
+from .get_information import pixel_to_pixel
 
-__all__ = ['extract_matching_files', 'read_tif', 'write_tif', 'crop_tif_by_bounds']
+__all__ = ['extract_matching_files', 'read_tif', 'write_tif', 'crop_tif_by_bounds', 'pixel_to_geo_coords',
+           'get_geotransform_and_crs', 'pixel_to_pixel', 'calculate_meters_per_degree_precise']
