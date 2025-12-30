@@ -5,8 +5,117 @@
 # @Author  : Kevin
 # @Describe: 地理坐标系的处理工具
 import os
+import glob
 import geopandas as gpd
-from osgeo import osr
+from osgeo import osr, gdal
+
+def batch_set_coordinate_system(tif_dir, srs_name="WGS84"):
+    """
+    批量为目录下的所有TIF文件设置坐标系
+
+    参数:
+        tif_dir: TIF文件所在目录路径
+        srs_name: 坐标系名称，默认为"WGS84"，支持EPSG代码如"EPSG:4326"等
+    """
+    # 支持的TIF文件扩展名
+    extensions = ['*.tif', '*.tiff', '*.TIF', '*.TIFF']
+    tif_files = []
+
+    # 获取目录下所有TIF文件
+    for ext in extensions:
+        tif_files.extend(glob.glob(os.path.join(tif_dir, ext)))
+        tif_files.extend(glob.glob(os.path.join(tif_dir, ext.lower())))
+
+    # 创建空间参考系统对象
+    srs = osr.SpatialReference()
+
+    # 根据输入设置坐标系
+    if srs_name.upper() == "WGS84":
+        srs.SetWellKnownGeogCS("WGS84")
+    elif srs_name.upper().startswith("EPSG:"):
+        epsg_code = int(srs_name.split(':')[1])
+        srs.ImportFromEPSG(epsg_code)
+    else:
+        # 尝试直接导入坐标系定义
+        try:
+            srs.SetWellKnownGeogCS(srs_name)
+        except:
+            try:
+                srs.ImportFromEPSG(int(srs_name))
+            except:
+                raise ValueError(f"无法识别的坐标系: {srs_name}")
+
+    # 设置坐标系的WKT字符串
+    wkt = srs.ExportToWkt()
+
+    print(f"正在处理目录: {tif_dir}")
+    print(f"目标坐标系: {srs_name}")
+    print(f"共找到 {len(tif_files)} 个TIF文件")
+
+    success_count = 0
+    fail_count = 0
+
+    for tif_path in tif_files:
+        try:
+            # 打开TIF文件
+            dataset = gdal.Open(tif_path, gdal.GA_Update)
+            if dataset is not None:
+                # 设置坐标系
+                dataset.SetProjection(wkt)
+                print(f"✓ 已为 {os.path.basename(tif_path)} 设置坐标系为 {srs_name}")
+                success_count += 1
+            else:
+                print(f"✗ 无法打开文件: {tif_path}")
+                fail_count += 1
+        except Exception as e:
+            print(f"✗ 处理文件 {tif_path} 时出错: {str(e)}")
+            fail_count += 1
+        finally:
+            # 确保数据集被正确关闭
+            if dataset:
+                dataset = None
+
+    print(f"\n处理完成！成功: {success_count}, 失败: {fail_count}")
+
+def set_coordinate_system_for_tif(tif_path, srs_name="WGS84"):
+    """
+    为单个TIF文件设置坐标系
+
+    参数:
+        tif_path: TIF文件路径
+        srs_name: 坐标系名称，默认为"WGS84"
+    """
+    # 创建空间参考系统对象
+    srs = osr.SpatialReference()
+
+    # 根据输入设置坐标系
+    if srs_name.upper() == "WGS84":
+        srs.SetWellKnownGeogCS("WGS84")
+    elif srs_name.upper().startswith("EPSG:"):
+        epsg_code = int(srs_name.split(':')[1])
+        srs.ImportFromEPSG(epsg_code)
+    else:
+        # 尝试直接导入坐标系定义
+        try:
+            srs.SetWellKnownGeogCS(srs_name)
+        except:
+            try:
+                srs.ImportFromEPSG(int(srs_name))
+            except:
+                raise ValueError(f"无法识别的坐标系: {srs_name}")
+
+    # 设置坐标系的WKT字符串
+    wkt = srs.ExportToWkt()
+
+    # 打开TIF文件并设置坐标系
+    dataset = gdal.Open(tif_path, gdal.GA_Update)
+    if dataset is not None:
+        dataset.SetProjection(wkt)
+        print(f"✓ 已为 {os.path.basename(tif_path)} 设置坐标系为 {srs_name}")
+        dataset = None  # 关闭数据集
+    else:
+        raise ValueError(f"无法打开TIF文件: {tif_path}")
+
 
 def get_shp_bounds(shp_path: str):
     """

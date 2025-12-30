@@ -123,8 +123,8 @@ Additional Features:
 - Returns both the target CRS object and a unified transformation function: `transform_func(x, y, z=0) -> (tx, ty)`.
 
 ### 3.2. `get_shp_wgs84_bounds`
-Function: Reads a Shapefile and returns its bounding box in WGS84 (EPSG:4326) longitude/latitude coordinates.
-Input: Path to a valid Shapefile (`.shp`).
+*  **Function**: Reads a Shapefile and returns its bounding box in WGS84 (EPSG:4326) longitude/latitude coordinates.
+*  **Input**: Path to a valid Shapefile (`.shp`).
 Output: `(lon_min, lat_min, lon_max, lat_max)` as floats.
 Behavior:
 - Raises `FileNotFoundError` if the Shapefile does not exist.
@@ -140,6 +140,12 @@ Usage:
     target_crs, transformer = create_coordinate_transformer(src_srs, target_srs)
     tx, ty = transform_coordinates(transformer, x, y)
     ```
+
+### 3.4. `batch_set_coordinate_system`
+*   **Function**: Assign a coordinate system to TIF files.
+
+### 3.5. `set_coordinate_system_for_tif`
+*   **Function**: Assign a coordinate system to the sigle TIF file.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -204,6 +210,12 @@ Usage:
 ### 6.1. `calculate_flow_accumulation`
 
 *   **Function**: Calculates flow accumulation for a DEM.
+*   **Installation focus**: Whitebox actually calls an exe file to execute.
+After installing the library using pip and executing it, exe will be automatically downloaded.
+but installing it using conda will not result in errors.
+After downloading and decompressing using pip, the path may also be incorrect.
+You need to manually adjust the location of the directory or the directory where whitebox_tools.exe is defined and displayed. 
+    ``wbt.exe_path = r"C:\Users\Kevin\anaconda3\envs\geo-torch\Lib\site-packages\whitebox\WBT"``
 *   **Workflow (Based on Whitebox GAT concepts)**:
     1.  Original DEM
     2.  First Pass Depression Filling (`fill_depressions`)

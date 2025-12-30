@@ -18,6 +18,7 @@ from rasterio.mask import mask
 import geopandas as gpd
 from shapely.geometry import Polygon, box
 
+from DEMAndRemoteSensingUtils.get_flow_accumulation import calculate_flow_accumulation
 from coordinate_system import get_shp_bounds
 from crop_dem_from_cordinate import crop_tif_by_bounds
 from utils import calculate_meters_per_degree_precise
@@ -119,35 +120,15 @@ def process_with_direction(obj, other_objs, extend_m, min_distance):
     """
     scale_lon, scale_lat = calculate_meters_per_degree_precise(obj['center_lon'], obj['center_lat'])
 
-    if obj['width_m'] > obj['height_m']:
-        if len(other_objs)==2:
-            if abs(other_objs[0]['height_m']/1.75-other_objs[1]['height_m']/1.5) < abs(other_objs[0]['height_m']/1.5-other_objs[1]['height_m']/1.75):
-                other_objs[0]['rel_h'] = other_objs[0]['height_m']/1.75
-                other_objs[1]['rel_h'] = other_objs[1]['height_m']/1.5
-            else:
-                other_objs[0]['rel_h'] = other_objs[0]['height_m']/1.5
-                other_objs[1]['rel_h'] = other_objs[1]['height_m']/1.75
-        elif len(other_objs)==1:
-            other_objs[0]['rel_h'] = other_objs[0]['height_m']/1.5
-        extend_dimension(obj, 'width', extend_m, scale_lon, scale_lat)
-        dim_to_adjust = 'height'
-    else:
-        if len(other_objs)==2:
-            if abs(other_objs[0]['width_m']/1.75-other_objs[1]['width_m']/1.5) < abs(other_objs[0]['width_m']/1.5-other_objs[1]['width_m']/1.75):
-                other_objs[0]['rel_h'] = other_objs[0]['width_m']/1.75
-                other_objs[1]['rel_h'] = other_objs[1]['width_m']/1.5
-            else:
-                other_objs[0]['rel_h'] = other_objs[0]['width_m']/1.5
-                other_objs[1]['rel_h'] = other_objs[1]['width_m']/1.75
-        elif len(other_objs)==1:
-            other_objs[0]['rel_h'] = other_objs[0]['width_m']/1.5
-
-        extend_dimension(obj, 'height', extend_m, scale_lon, scale_lat)
-        dim_to_adjust = 'width'
+    direction_dict = {0: "height", 1:"width"}
+    direction = obj['width_m'] >= obj['height_m']
+    obj['direction'] = direction_dict[direction]
+    extend_dimension(obj, direction_dict[direction], extend_m, scale_lon, scale_lat)
 
     for other in other_objs:
+        other['direction'] = direction_dict[direction]
         other_scale_lon, other_scale_lat = calculate_meters_per_degree_precise(other['center_lon'], other['center_lat'])
-        adjust_slope_dimension(other, obj, dim_to_adjust, min_distance, other_scale_lon, other_scale_lat)
+        adjust_slope_dimension(other, obj, direction_dict[1-direction], min_distance, other_scale_lon, other_scale_lat)
 
     update_geometry_from_params(obj)
 
@@ -168,51 +149,32 @@ def process_two_slopes_mutual(slope1, slope2, extend_m=10, min_distance=30):
     scale1_lon, scale1_lat = calculate_meters_per_degree_precise(*center1)
     scale2_lon, scale2_lat = calculate_meters_per_degree_precise(*center2)
 
-    if angle_diff > 45:  # 更接近 0° → 沿 width 扩展
-        if abs(slope1['width_m'] / 1.75 - slope2['width_m'] / 1.5) < abs(
-                slope1['width_m'] / 1.5 - slope2['width_m'] / 1.75):
-            slope1['rel_h'] = slope1['width_m'] / 1.75
-            slope2['rel_h'] = slope2['width_m'] / 1.5
-        else:
-            slope1['rel_h'] = slope1['width_m'] / 1.5
-            slope2['rel_h'] = slope2['width_m'] / 1.75
-        extend_dimension(slope1, 'width', extend_m, scale1_lon, scale1_lat)
-        extend_dimension(slope2, 'width', extend_m, scale2_lon, scale2_lat)
-        adjust_slope_dimension(slope1, slope2, 'height', min_distance, scale1_lon, scale1_lat)
-        adjust_slope_dimension(slope2, slope1, 'height', min_distance, scale2_lon, scale2_lat)
-    else:  # 更接近 90° → 沿 height 扩展
-        if abs(slope1['height_m'] / 1.75 - slope2['height_m'] / 1.5) < abs(
-                slope1['height_m'] / 1.5 - slope2['height_m'] / 1.75):
-            slope1['rel_h'] = slope1['height_m'] / 1.75
-            slope2['rel_h'] = slope2['height_m'] / 1.5
-        else:
-            slope1['rel_h'] = slope1['height_m'] / 1.5
-            slope2['rel_h'] = slope2['height_m'] / 1.75
-        extend_dimension(slope1, 'height', extend_m, scale1_lon, scale1_lat)
-        extend_dimension(slope2, 'height', extend_m, scale2_lon, scale2_lat)
-        adjust_slope_dimension(slope1, slope2, 'width', min_distance, scale1_lon, scale1_lat)
-        adjust_slope_dimension(slope2, slope1, 'width', min_distance, scale2_lon, scale2_lat)
+    direction_dict = {0: "height", 1: "width"}
+    direction = angle_diff > 45
+    slope1['direction'] = direction_dict[direction]
+    slope2['direction'] = direction_dict[direction]
+
+    extend_dimension(slope1, direction_dict[direction], extend_m, scale1_lon, scale1_lat)
+    extend_dimension(slope2, direction_dict[direction], extend_m, scale2_lon, scale2_lat)
+    adjust_slope_dimension(slope1, slope2, direction_dict[1-direction], min_distance, scale1_lon, scale1_lat)
+    adjust_slope_dimension(slope2, slope1, direction_dict[1-direction], min_distance, scale2_lon, scale2_lat)
 
     update_geometry_from_params(slope1)
     update_geometry_from_params(slope2)
 
-
-def extract_min_elevation_from_dem(gdf, dem_path):
+def extract_elevation_from_dem(gdf, dem_path, type='min'):
     """
-    从DEM数据中提取每个几何图形区域的最小高程值
+    从DEM数据中提取每个几何图形区域的最小（大）的值
 
     Args:
         gdf: GeoDataFrame，包含几何图形
         dem_path: DEM文件路径
 
     Returns:
-        list: 每个几何图形对应的最小高程值
+        list: 每个几何图形对应的最小（大）的值
     """
-    import rasterio
-    from rasterio.mask import mask
-    import numpy as np
 
-    min_elevations = []
+    target_elevations = []
 
     with rasterio.open(dem_path) as dem_src:
         for idx, row in gdf.iterrows():
@@ -222,15 +184,18 @@ def extract_min_elevation_from_dem(gdf, dem_path):
                 # 提取有效数据（去除nodata值）
                 valid_data = out_image[out_image != dem_src.nodata]
                 if len(valid_data) > 0:
-                    min_elevation = np.min(valid_data)
+                    if type == 'min':
+                        target_elevation = np.min(valid_data)
+                    elif type == 'max':
+                        target_elevation = np.max(valid_data)
                 else:
-                    min_elevation = None
-                min_elevations.append(min_elevation)
+                    target_elevation = None
+                target_elevations.append(target_elevation)
             except Exception as e:
                 print(f"处理索引 {idx} 时出错: {e}")
-                min_elevations.append(None)
+                target_elevations.append(None)
 
-    return min_elevations
+    return target_elevations
 
 def update_dem_with_elevation_values(gdf, dem_path, output_dem_path):
     """
@@ -277,7 +242,7 @@ def update_dem_with_elevation_values(gdf, dem_path, output_dem_path):
                 # 关键：all_touched=True → 像元只要碰到多边形边界就算
                 masked, _ = mask(src, [geom], crop=False, all_touched=True, nodata=dem_nodata)
                 intersect_mask = masked[0] != dem_nodata
-                updated_data[intersect_mask] = float(elev)
+                updated_data[intersect_mask & (updated_data > float(elev))] = float(elev)
             except Exception as e:
                 print(f"⚠️ 要素 {idx} 处理失败: {e}")
                 continue
@@ -290,6 +255,7 @@ def update_dem_with_elevation_values(gdf, dem_path, output_dem_path):
 
 
 def process(args, logger: logging.Logger):
+    gdf = gpd.read_file(args.shp_path)
 
     crop_dem_by_shapefile_bounds(
         shp_path=args.shp_path,
@@ -299,10 +265,13 @@ def process(args, logger: logging.Logger):
         logger=logger
     )
 
-    gdf = gpd.read_file(args.shp_path)
-
     extend = args.extend
     distance = args.min_width
+    gdf['type'] = None
+    gdf['direction'] = None  # 0=height, 1=width
+    gdf['angle_diff'] = None  # 仅two slopes无road场景
+    gdf['rel_h'] = None
+    gdf['associated_slopes'] = None  # 存储关联的slope索引，方便后续计算
 
     for group_id, group_gdf in gdf.groupby('group_id'):
         label_counts = group_gdf['label'].value_counts()
@@ -341,23 +310,111 @@ def process(args, logger: logging.Logger):
             slope = dict_from_row(group_gdf.loc[slope_idx])
             # 单坡度：沿主方向扩展，并确保另一维度 ≥ min_distance
             scale_lon, scale_lat = calculate_meters_per_degree_precise(slope['center_lon'], slope['center_lat'])
-            if slope['width_m'] > slope['height_m']:
-                slope['rel_h'] = slope['height_m'] / 1.5
-                extend_dimension(slope, 'width', extend, scale_lon, scale_lat)
-                if slope['height_m'] < distance * 2:
-                    extend_dimension(slope, 'height', distance * 2 - slope['height_m'], scale_lon, scale_lat)
-            else:
-                slope['rel_h'] = slope['width_m'] / 1.5
-                extend_dimension(slope, 'height', extend, scale_lon, scale_lat)
-                if slope['width_m'] < distance * 2:
-                    extend_dimension(slope, 'width', distance * 2 - slope['width_m'], scale_lon, scale_lat)
+            direction_dict = {0: "height", 1: "width"}
+            direction_m_dict = {0: "height_m", 1: "width_m"}
+            direction = slope['width_m'] > slope['height_m']
+            slope["direction"] = direction_dict[direction]
+            extend_dimension(slope, direction_dict[direction], extend, scale_lon, scale_lat)
+            if slope[direction_m_dict[1-direction]] < distance * 2:
+                extend_dimension(slope, direction_dict[1-direction], distance * 2 - slope[direction_m_dict[1-direction]],
+                                 scale_lon, scale_lat)
             update_geometry_from_params(slope)
             update_gdf_from_dict(gdf, slope_idx, slope)
 
-    min_elevations = extract_min_elevation_from_dem(gdf, args.output_tif)
-
-    # 添加最小高程列到GeoDataFrame
+    min_elevations = extract_elevation_from_dem(gdf, args.output_tif)
     gdf['min_elev'] = min_elevations
+
+    calculate_flow_accumulation(args.output_tif, args.output_tif_flow_accumulation)
+    max_flow_accum = extract_elevation_from_dem(gdf, args.output_tif_flow_accumulation, type='max')
+    gdf['max_flow_accum'] = max_flow_accum
+
+    direction_dict = {0: "height", 1: "width"}
+    dict_direction = {"height": 0, "width": 1}
+    direction_m_dict = {0: "height_m", 1: "width_m"}
+    ratio = {'downstream': 1.5, 'upstream': 1.75, 'unknown': 1.4}
+
+    # 3. 按group_id遍历，计算每个要素的type和rel_h
+    for group_id, group_gdf in gdf.groupby('group_id'):
+        label_counts = group_gdf['label'].value_counts()
+        slope_count = label_counts.get('slope', 0)
+        road_count = label_counts.get('road', 0)
+
+        # 场景1: 2 slopes + 1 road
+        if slope_count == 2 and road_count == 1:
+            slope_idxs = group_gdf[group_gdf['label'] == 'slope'].index.tolist()
+            s1_idx, s2_idx = slope_idxs
+            s1_mfa = gdf.loc[s1_idx, 'max_flow_accum']
+            s2_mfa = gdf.loc[s2_idx, 'max_flow_accum']
+
+            # 赋值type
+            if s1_mfa > s2_mfa:
+                gdf.at[s1_idx, 'type'] = 'downstream'
+                gdf.at[s2_idx, 'type'] = 'upstream'
+            elif s1_mfa < s2_mfa:
+                gdf.at[s1_idx, 'type'] = 'upstream'
+                gdf.at[s2_idx, 'type'] = 'downstream'
+            else:
+                gdf.at[s1_idx, 'type'] = 'unknown'
+                gdf.at[s2_idx, 'type'] = 'unknown'
+
+            # 计算rel_h（road的direction决定维度）
+            road_idx = group_gdf[group_gdf['label'] == 'road'].index[0]
+            direction = dict_direction[gdf.loc[road_idx, 'direction']]
+            for s_idx in slope_idxs:
+                slope_type = gdf.loc[s_idx, 'type']
+                rel_h_dim = direction_m_dict[1 - direction]  # 1-direction是另一维度
+                gdf.at[s_idx, 'rel_h'] = gdf.loc[s_idx, rel_h_dim] / ratio[slope_type]
+
+        # 场景2: 1 slope + 1 road
+        elif slope_count == 1 and road_count == 1:
+            slope_idx = group_gdf[group_gdf['label'] == 'slope'].index[0]
+            # 赋值type
+            gdf.at[slope_idx, 'type'] = 'downstream'
+
+            # 计算rel_h
+            road_idx = group_gdf[group_gdf['label'] == 'road'].index[0]
+            direction = dict_direction[gdf.loc[road_idx, 'direction']]
+            slope_type = gdf.loc[slope_idx, 'type']
+            rel_h_dim = direction_m_dict[1 - direction]
+            gdf.at[slope_idx, 'rel_h'] = gdf.loc[slope_idx, rel_h_dim] / ratio[slope_type]
+
+        # 场景3: 2 slopes + 0 road
+        elif slope_count == 2 and road_count == 0:
+            slope_idxs = group_gdf[group_gdf['label'] == 'slope'].index.tolist()
+            s1_idx, s2_idx = slope_idxs
+            s1_mfa = gdf.loc[s1_idx, 'max_flow_accum']
+            s2_mfa = gdf.loc[s2_idx, 'max_flow_accum']
+
+            # 赋值type
+            if s1_mfa > s2_mfa:
+                gdf.at[s1_idx, 'type'] = 'downstream'
+                gdf.at[s2_idx, 'type'] = 'upstream'
+            elif s1_mfa < s2_mfa:
+                gdf.at[s1_idx, 'type'] = 'upstream'
+                gdf.at[s2_idx, 'type'] = 'downstream'
+            else:
+                gdf.at[s1_idx, 'type'] = 'unknown'
+                gdf.at[s2_idx, 'type'] = 'unknown'
+
+            # 计算rel_h（依赖angle_diff）
+            angle_diff = gdf.loc[s1_idx, 'angle_diff']
+            direction = dict_direction[gdf.loc[s1_idx, 'direction']]
+            for s_idx in slope_idxs:
+                slope_type = gdf.loc[s_idx, 'type']
+                rel_h_dim = direction_m_dict[direction]
+                gdf.at[s_idx, 'rel_h'] = gdf.loc[s_idx, rel_h_dim] / ratio[slope_type]
+
+        # 场景4: 1 slope + 0 road
+        elif slope_count == 1 and road_count == 0:
+            slope_idx = group_gdf[group_gdf['label'] == 'slope'].index[0]
+            # 赋值type
+            gdf.at[slope_idx, 'type'] = 'downstream'
+
+            # 计算rel_h
+            direction = dict_direction[gdf.loc[slope_idx, 'direction']]
+            slope_type = gdf.loc[slope_idx, 'type']
+            rel_h_dim = direction_m_dict[1 - direction]  # 另一维度
+            gdf.at[slope_idx, 'rel_h'] = gdf.loc[slope_idx, rel_h_dim] / ratio[slope_type]
 
     # 根据原始数据计算高程值
     for group_id, group_gdf in gdf.groupby('group_id'):
@@ -402,7 +459,6 @@ def process(args, logger: logging.Logger):
             s1 = dict_from_row(group_gdf.loc[slope_idxs[0]])
             s2 = dict_from_row(group_gdf.loc[slope_idxs[1]])
 
-            # 从更新后的gdf中获取min_elev和rel_h值
             s1_min_elev = gdf.loc[slope_idxs[0], 'min_elev']
             s2_min_elev = gdf.loc[slope_idxs[1], 'min_elev']
             s1_rel_h = gdf.loc[slope_idxs[0], 'rel_h']
@@ -412,24 +468,20 @@ def process(args, logger: logging.Logger):
             elev_value = 0.5 * (s1_min_elev + s1_rel_h + s2_min_elev + s2_rel_h)
             s1['elev'] = elev_value
             s2['elev'] = elev_value
-            # 更新回gdf
             update_gdf_from_dict(gdf, slope_idxs[0], s1)
             update_gdf_from_dict(gdf, slope_idxs[1], s2)
 
         elif slope_count == 1 and road_count == 0:
             slope_idx = group_gdf[group_gdf['label'] == 'slope'].index[0]
             s = dict_from_row(group_gdf.loc[slope_idx])
-            # 从更新后的gdf中获取min_elev和rel_h值
             s_min_elev = gdf.loc[slope_idx, 'min_elev']
             s_rel_h = gdf.loc[slope_idx, 'rel_h']
-            # 计算坡度的高程值
             s['elev'] = s_min_elev + s_rel_h
-            # 更新回gdf
             update_gdf_from_dict(gdf, slope_idx, s)
 
-    gdf.to_file(r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\test.shp")
+    gdf.to_file(args.output_shp_path)
 
-    update_dem_with_elevation_values(gdf, args.output_tif, r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\final.tif")
+    update_dem_with_elevation_values(gdf, args.output_tif, args.modified_tif)
 
 
 def crop_dem_by_shapefile_bounds(shp_path: str, input_tif: str, output_tif: str, buffer_distance: float, logger: logging.Logger):
@@ -448,13 +500,24 @@ def crop_dem_by_shapefile_bounds(shp_path: str, input_tif: str, output_tif: str,
 def main():
     parser = argparse.ArgumentParser(description="根据 Shapefile 范围裁剪 DEM TIF（带缓冲区）")
     parser.add_argument("--shp_path", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\check_dam_struct.shp")
+    parser.add_argument("--output_shp_path", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\check_dam.shp")
     parser.add_argument("--input_tif", type=str, default=r"C:\Users\Kevin\Documents\ResearchData\Copernicus\Loess_Plateau_Copernicus.tif")
-    parser.add_argument("--output_tif", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\test.tif")
+    parser.add_argument("--output_tif", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\check_dam.tif")
+    parser.add_argument("--output_tif_flow_accumulation", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\WMG_ACCUM.tif")
+    parser.add_argument("--modified_tif", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\final_dam.tif")
     parser.add_argument("--buffer", type=float, default=2.0)
     parser.add_argument("--log", type=str, default=r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SlopeExtraction\crop_dem_log.txt")
-    parser.add_argument("--extend", type=int, default=20)
-    parser.add_argument("--min-width", type=int, default=30)
+    parser.add_argument("--extend", type=int, default=50)
+    parser.add_argument("--min-width", type=int, default=60)
     args = parser.parse_args()
+
+    args.shp_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\check_dam_slope_and_road.shp"
+    args.input_tif = r"C:\Users\Kevin\Documents\ResearchData\WangMao\cleaned_dem.tif"
+    args.output_shp_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\check_dam.shp"
+    args.output_tif = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\check_dam.tif"
+    args.output_tif_flow_accumulation = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WMG_ACCUM.tif"
+    args.modified_tif = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WGM_FILLED.tif"
+    args.log = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\crop_dem_log.txt"
 
     os.makedirs(os.path.dirname(args.log), exist_ok=True)
     logger = setup_logger(args.log)

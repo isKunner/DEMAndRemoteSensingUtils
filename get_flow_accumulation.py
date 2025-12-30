@@ -5,34 +5,108 @@
 # @Author  : Kevin
 # @Describe: 获取Tif文件的流向累计
 import os
-import shutil
 import whitebox
+import subprocess
+
+from osgeo import gdal
+import gc
 
 # --------------------------
-# 参数设置（根据实际数据修改）
+# 新增：关闭TIFF文件句柄的核心函数（仅关文件，无额外判断）
 # --------------------------
-def calculate_flow_accumulation(dem_path, flow_accum_path, stream_path=None, threshold=1000):
+def close_tiff_handle(tif_path):
+    """显式关闭TIFF文件句柄，释放内存/文件占用"""
+    if os.path.exists(tif_path):
+        try:
+            # GDAL打开并立即置空，强制关闭句柄
+            ds = gdal.Open(tif_path)
+            if ds:
+                ds = None  # GDAL关闭句柄的核心操作
+            gc.collect()  # 强制垃圾回收，释放内存
+        except Exception as e:
+            # 仅打印警告，不中断流程（按你的要求不加额外判断）
+            print(f"关闭TIFF句柄警告: {tif_path} - {str(e)}")
+
+# --------------------------
+# 原有：元数据修复函数
+# --------------------------
+def fix_geotiff_metadata(input_tif, output_tif, epsg_code="4326"):
+    """修复GeoTIFF元数据，清除无效UTF-8字节"""
+    try:
+        gdal_cmd = [
+            "gdal_translate",
+            "-of", "GTiff",
+            "-co", "COMPRESS=NONE",
+            "-co", "PROFILE=GDALGeoTIFF",
+            "-a_srs", f"EPSG:{epsg_code}",
+            input_tif,
+            output_tif
+        ]
+        result = subprocess.run(
+            gdal_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            encoding='utf-8',
+            errors='ignore'
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"GDAL修复元数据失败: {result.stderr}")
+        # 验证修复后无无效字节
+        verify_cmd = ["gdalinfo", output_tif]
+        verify_result = subprocess.run(verify_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        if "GeoASCIIParams contains null byte" in verify_result.stderr.decode('utf-8', errors='ignore'):
+            raise RuntimeError("元数据修复后仍存在无效字节！")
+        return True
+    except Exception as e:
+        raise RuntimeError(f"修复GeoTIFF元数据出错: {str(e)}")
+
+# --------------------------
+# 原有：参数设置（仅新增关闭句柄逻辑）
+# --------------------------
+def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_exe_dir=r"C:\Users\Kevin\anaconda3\envs\geo-torch\Lib\site-packages\whitebox\WBT"):
     """
-    计算DEM的汇流累积量，仅保存最终结果，自动清理中间文件
+    计算DEM的汇流累积量，支持自定义临时文件路径，仅删除中间文件不删目录
 
     参数:
         dem_path: 输入DEM的文件路径（.tif格式）
         flow_accum_path: 汇流累积量输出文件路径（.tif格式）
+        temp_dir: 临时文件存储目录（None则使用dem_path同目录，非None则创建该目录）
     """
     # 初始化Whitebox工具
     wbt = whitebox.WhiteboxTools()
-    wbt.verbose = False  # 关闭冗余日志
+    if wbt_exe_dir is not None:
+        wbt.exe_path = wbt_exe_dir
+    if not os.path.exists(wbt_exe_dir):
+        raise FileNotFoundError(f"The specified WhiteboxTools executable directory does not exist: {wbt_exe_dir}")
 
-    user_home = os.path.expanduser(r"~\Desktop")
-    temp_dir = os.path.join(user_home, "checkdam_temp")
-    os.makedirs(temp_dir, exist_ok=True)
+    wbt.verbose = True  # 关闭冗余日志
+
+    intermediate_files = []  # 收集所有中间文件路径，用于后续删除
+    if temp_dir is None:
+        # temp_dir为None时，中间文件放在input_dem同路径下
+        temp_dir = os.path.dirname(dem_path)
+    else:
+        # temp_dir不为None时，创建指定目录（确保存在）
+        os.makedirs(temp_dir, exist_ok=True)
+
+    preprocessed_dem_path = os.path.join(temp_dir, "preprocessed_dem.tif")
+    intermediate_files.append(preprocessed_dem_path)
 
     filled_dem_path = os.path.join(temp_dir, "filled_dem.tif")
+    intermediate_files.append(filled_dem_path)
+
     flow_dir_path = os.path.join(temp_dir, "flow_direction.tif")
+    intermediate_files.append(flow_dir_path)
+
     intermediate_fill_path = os.path.join(temp_dir, "intermediate_filled.tif")
+    intermediate_files.append(intermediate_fill_path)
+
+    # 新增：修复后的填洼文件路径
+    intermediate_fill_fixed_path = os.path.join(temp_dir, "intermediate_filled_fixed.tif")
+    intermediate_files.append(intermediate_fill_fixed_path)  # 加入待删除列表
 
     # 1. DEM预处理：填洼
-    print("Start DEM filling the pothole...")
     fill_result1 = wbt.fill_depressions(
         dem=dem_path,
         output=intermediate_fill_path,
@@ -55,40 +129,29 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, stream_path=None, thr
         elif fill_result1 == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
+    # --------------------------
+    # 新增：填洼后关闭TIFF句柄
+    # --------------------------
+    close_tiff_handle(intermediate_fill_path)
 
-    print("Begin the second stage of deep depression filling...")
-    # 第二阶段：使用更激进的参数处理残留洼地
-    fill_result2 = wbt.fill_depressions(
-        dem=intermediate_fill_path,
-        output=filled_dem_path,
-        fix_flats=True,
-        flat_increment=0.005,  # 更小的平坦区域增量，确保水流连续性
-        max_depth=None
-    )
-    if fill_result2 != 0 or not os.path.exists(filled_dem_path):
-        error_msg = f"The second stage of depression filling failed with code: {fill_result2}"
-        if fill_result2 == 1:
-            error_msg += " (Missing required input file)"
-        elif fill_result2 == 2:
-            error_msg += " (Invalid input value/combination)"
-        elif fill_result2 == 3:
-            error_msg += " (Error in input file)"
-        elif fill_result2 == 4:
-            error_msg += " (I/O error)"
-        elif fill_result2 == 5:
-            error_msg += " (Unsupported data type)"
-        elif fill_result2 == 32:
-            error_msg += " (Timeout error)"
-        raise RuntimeError(error_msg)
+    # 修复填洼文件的元数据（解决breach_depressions编码错误）
+    try:
+        fix_geotiff_metadata(intermediate_fill_path, intermediate_fill_fixed_path, epsg_code="4326")
+    except Exception as e:
+        raise RuntimeError(f"修复填洼文件元数据失败: {str(e)}")
+    # --------------------------
+    # 新增：修复元数据后关闭新旧文件句柄
+    # --------------------------
+    close_tiff_handle(intermediate_fill_path)
+    close_tiff_handle(intermediate_fill_fixed_path)
 
-    # 2. DEM预处理：削峰
-    print("Start DEM peak shaving...")
+    # 2. DEM预处理：破坝（输入改为修复后的文件）
     breach_result1 = wbt.breach_depressions(
-        dem=filled_dem_path,
+        dem=intermediate_fill_fixed_path,  # 关键：使用修复后的文件
         output=filled_dem_path,
         max_depth=10.0,  # 限制浅洼地的最大处理深度（米）
         max_length=50,  # 限制 breach 通道长度（网格单元数）
-        flat_increment=0.0001,  # 保持平坦区域连续性
+        flat_increment=0.001,  # 保持平坦区域连续性
         fill_pits=True  # 填充单像素坑洼
     )
     if breach_result1 != 0 or not os.path.exists(filled_dem_path):
@@ -106,33 +169,13 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, stream_path=None, thr
         elif breach_result1 == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
-
-    breach_result2 = wbt.breach_depressions(
-        dem=filled_dem_path,
-        output=filled_dem_path,
-        max_depth=None,  # 不限制深度，处理深洼地
-        max_length=None,  # 不限制长度，处理狭长洼地
-        flat_increment=0.0001,
-        fill_pits=True
-    )
-    if breach_result2 != 0 or not os.path.exists(filled_dem_path):
-        error_msg = f"The second DEM peak shaving process failed with code: {breach_result2}"
-        if breach_result2 == 1:
-            error_msg += " (Missing required input file)"
-        elif breach_result2 == 2:
-            error_msg += " (Invalid input value/combination)"
-        elif breach_result2 == 3:
-            error_msg += " (Error in input file)"
-        elif breach_result2 == 4:
-            error_msg += " (I/O error)"
-        elif breach_result2 == 5:
-            error_msg += " (Unsupported data type)"
-        elif breach_result2 == 32:
-            error_msg += " (Timeout error)"
-        raise RuntimeError(error_msg)
+    # --------------------------
+    # 新增：破坝后关闭TIFF句柄
+    # --------------------------
+    close_tiff_handle(intermediate_fill_fixed_path)
+    close_tiff_handle(filled_dem_path)
 
     # 3. 计算流向
-    print("Start calculating the flow direction...")
     flow_dir_result = wbt.d8_pointer(
         dem=filled_dem_path,
         output=flow_dir_path,
@@ -153,10 +196,13 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, stream_path=None, thr
         elif flow_dir_result == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
+    # --------------------------
+    # 新增：计算流向后关闭TIFF句柄
+    # --------------------------
+    close_tiff_handle(filled_dem_path)
+    close_tiff_handle(flow_dir_path)
 
     # 4. 计算汇流累积量（最终需要保存的结果）
-    print("Start calculating the accumulated amount of confluence...")
-    # 确保输出目录存在
     output_dir = os.path.dirname(flow_accum_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
@@ -182,19 +228,29 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, stream_path=None, thr
         elif accum_result == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
+    # --------------------------
+    # 新增：计算汇流后关闭TIFF句柄
+    # --------------------------
+    close_tiff_handle(flow_dir_path)
+    close_tiff_handle(flow_accum_path)
 
-    print(f"The accumulated amount of the confluence is calculated, and the result is saved to: {flow_accum_path}")
-
-    shutil.rmtree(temp_dir)
+    # 删除中间文件前，先关闭所有中间文件句柄（新增）
+    for file_path in intermediate_files:
+        close_tiff_handle(file_path)
+    # 原有：删除中间文件
+    for file_path in intermediate_files:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Failed to delete {file_path}: {str(e)}")
 
 # 示例用法
 if __name__ == "__main__":
     # 输入DEM路径
-    input_dem = r"C:\Users\Kevin\Desktop\results\375858_1103666\375858_1103666_DEM_10.tif"
+    input_dem = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WMG.tif"
     # 输出汇流累积量路径
-    output_accum = r"C:\Users\Kevin\Desktop\test.tif"
-    # 输出流向路径
-    output_stream = r"C:\Users\Kevin\Desktop\test_stream.tif"
+    output_accum = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WMG_ACCUM.tif"
 
-    # 调用函数
-    calculate_flow_accumulation(input_dem, output_accum, output_stream)
+    # 调用示例1：temp_dir=None（中间文件存在input_dem同目录，仅删文件）
+    calculate_flow_accumulation(input_dem, output_accum)
