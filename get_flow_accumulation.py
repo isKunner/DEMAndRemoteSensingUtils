@@ -96,15 +96,21 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_ex
     filled_dem_path = os.path.join(temp_dir, "filled_dem.tif")
     intermediate_files.append(filled_dem_path)
 
+    filled_dem_fixed_path = os.path.join(temp_dir, "filled_dem_fixed.tif")
+    intermediate_files.append(filled_dem_fixed_path)
+
     flow_dir_path = os.path.join(temp_dir, "flow_direction.tif")
     intermediate_files.append(flow_dir_path)
+
+    flow_dir_fixed_path = os.path.join(temp_dir, "flow_direction_fixed.tif")
+    intermediate_files.append(flow_dir_fixed_path)
 
     intermediate_fill_path = os.path.join(temp_dir, "intermediate_filled.tif")
     intermediate_files.append(intermediate_fill_path)
 
-    # 新增：修复后的填洼文件路径
     intermediate_fill_fixed_path = os.path.join(temp_dir, "intermediate_filled_fixed.tif")
     intermediate_files.append(intermediate_fill_fixed_path)  # 加入待删除列表
+
 
     # 1. DEM预处理：填洼
     fill_result1 = wbt.fill_depressions(
@@ -169,15 +175,20 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_ex
         elif breach_result1 == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
-    # --------------------------
-    # 新增：破坝后关闭TIFF句柄
-    # --------------------------
+
     close_tiff_handle(intermediate_fill_fixed_path)
+
+    try:
+        fix_geotiff_metadata(filled_dem_path, filled_dem_fixed_path, epsg_code="4326")
+    except Exception as e:
+        raise RuntimeError(f"修复填洼文件元数据失败: {str(e)}")
+
     close_tiff_handle(filled_dem_path)
+    close_tiff_handle(filled_dem_fixed_path)
 
     # 3. 计算流向
     flow_dir_result = wbt.d8_pointer(
-        dem=filled_dem_path,
+        dem=filled_dem_fixed_path,
         output=flow_dir_path,
         esri_pntr=False
     )
@@ -196,11 +207,16 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_ex
         elif flow_dir_result == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
-    # --------------------------
-    # 新增：计算流向后关闭TIFF句柄
-    # --------------------------
-    close_tiff_handle(filled_dem_path)
+
+    close_tiff_handle(filled_dem_fixed_path)
+
+    try:
+        fix_geotiff_metadata(flow_dir_path, flow_dir_fixed_path, epsg_code="4326")
+    except Exception as e:
+        raise RuntimeError(f"修复流向文件元数据失败: {str(e)}")
+
     close_tiff_handle(flow_dir_path)
+    close_tiff_handle(flow_dir_fixed_path)
 
     # 4. 计算汇流累积量（最终需要保存的结果）
     output_dir = os.path.dirname(flow_accum_path)
@@ -208,7 +224,7 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_ex
         os.makedirs(output_dir, exist_ok=True)
 
     accum_result = wbt.d8_flow_accumulation(
-        i=flow_dir_path,
+        i=flow_dir_fixed_path,
         output=flow_accum_path,
         pntr=True,
         esri_pntr=False
@@ -228,10 +244,8 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, wbt_ex
         elif accum_result == 32:
             error_msg += " (Timeout error)"
         raise RuntimeError(error_msg)
-    # --------------------------
-    # 新增：计算汇流后关闭TIFF句柄
-    # --------------------------
-    close_tiff_handle(flow_dir_path)
+
+    close_tiff_handle(flow_dir_fixed_path)
     close_tiff_handle(flow_accum_path)
 
     # 删除中间文件前，先关闭所有中间文件句柄（新增）
