@@ -12,6 +12,87 @@ from affine import Affine
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 from scipy import ndimage
 
+def upsample_geography_data(input_tif_path, output_tif_path, factor=3,
+                           resampling_method=Resampling.bilinear):
+    """
+    对地理坐标系下的数据进行上采样（提高分辨率），支持多波段。
+
+    参数:
+        input_tif_path (str): 输入地理坐标系 TIFF 文件路径
+        output_tif_path (str): 输出上采样后 TIFF 文件路径
+        factor (int, optional): 上采样倍率，默认为 3
+        resampling_method (rasterio.enums.Resampling, optional): 插值方法，默认双线性插值
+    """
+    if factor < 1:
+        raise ValueError("上采样倍率必须大于或等于 1")
+
+    if factor == 1:
+        print(f"警告: 上采样倍率为 1，正在复制文件: {input_tif_path} -> {output_tif_path}")
+        import shutil
+        shutil.copy2(input_tif_path, output_tif_path)
+        print(f"文件复制完成: {output_tif_path}")
+        return
+
+    with rasterio.open(input_tif_path, 'r') as src:
+        # 检查是否为地理坐标系
+        if not src.crs.is_geographic:
+            raise ValueError("输入文件不是地理坐标系，请使用投影坐标系上采样函数")
+
+        # 获取原始参数
+        original_width = src.width
+        original_height = src.height
+        original_transform = src.transform
+        count = src.count  # 波段数
+        dtype = src.dtypes[0]
+        crs = src.crs
+        nodata = src.nodata
+
+        print(f"开始上采样处理: {input_tif_path}")
+        print(f"  原始尺寸: {original_height} x {original_width}")
+        print(f"  原始分辨率: {src.res}")
+        print(f"  上采样倍率: {factor}")
+        print(f"  插值方法: {resampling_method.name}")
+
+        # 计算新的尺寸
+        new_width = original_width * factor
+        new_height = original_height * factor
+
+        # 计算新的仿射变换矩阵
+        new_transform = Affine(
+            original_transform.a / factor,  # x方向像素大小（缩小）
+            original_transform.b,          # 旋转参数
+            original_transform.c,          # 左上角x坐标
+            original_transform.d,          # 旋转参数
+            original_transform.e / factor, # y方向像素大小（缩小，通常为负值）
+            original_transform.f           # 左上角y坐标
+        )
+
+        # 准备输出文件元数据
+        profile = src.profile.copy()
+        profile.update({
+            'width': new_width,
+            'height': new_height,
+            'transform': new_transform,
+            'compress': 'lzw',  # 添加压缩
+            'dtype': rasterio.float32
+        })
+
+        # 读取并上采样所有波段
+        print(f"  正在进行上采样 (尺寸: {original_height}x{original_width} -> {new_height}x{new_width})...")
+        data = src.read(
+            out_shape=(count, new_height, new_width),
+            resampling=resampling_method,
+            out_dtype=rasterio.float32
+        )
+
+        # 写入输出文件
+        print(f"  正在写入文件: {output_tif_path}...")
+        with rasterio.open(output_tif_path, 'w', **profile) as dst:
+            dst.write(data)
+
+        print(f"  上采样完成: {output_tif_path}")
+        print(f"  新分辨率: {dst.res}")
+
 
 def unify_dem(input_dem_path, target_dem_path, output_path=None, buffer_pixels=1):
     """
@@ -769,19 +850,21 @@ def downsample_directory_advanced(input_dir, output_dir, factor=2,
 
 if __name__ == '__main__':
     # 示例使用
-    # target_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\Google\3951.tif"
-    # input_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\DEM\3951.tif"
-    # output_path = r"C:\Users\Kevin\Desktop\test.tif"
+    target_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WMG.tif"
+    input_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_30_WMG\WMG.tif"
+    output_path = r"C:\Users\Kevin\Documents\ResearchData\WangMao\30_to_10_Copernicus_WMG.tif"
+
+    upsample_geography_data(input_path, output_path)
 
     # 使用最优的统一分辨率函数
     # unify_dem(input_path, target_path, output_path, buffer_pixels=1)
 
     # 或者使用其他函数
-    # resample_to_target_resolution(input_path, output_path, 30)
-    # resample_geography_to_target_resolution(input_path, output_path, 30)
+    # resample_to_target_resolution(input_path, output_path, 10)
+    # resample_geography_to_target_resolution(input_path, output_path, 10)
 
-    input_dir = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\Google"
-    output_dir = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\Google_downsample_2"
+    # input_dir = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\Google"
+    # output_dir = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\SpatialInfoExtraction\Google_downsample_2"
 
-    downsample_directory(input_dir, output_dir, factor=4)
+    # downsample_directory(input_dir, output_dir, factor=4)
     # downsample_directory_advanced(input_dir, output_dir, factor=8, sharpen_weight=0.9, smooth_sigma=1)

@@ -69,6 +69,7 @@ def split_tif(input_path, output_dir, tile_size, overlap):
                 )
 
                 # 保存瓦片
+                # 这里改变了类型，切记切记
                 tile_name = f"tile_{h_idx}_{w_idx}.tif"
                 tile_path = os.path.join(output_dir, tile_name)
                 with rasterio.open(
@@ -77,7 +78,7 @@ def split_tif(input_path, output_dir, tile_size, overlap):
                         height=tile_data.shape[0],
                         width=tile_data.shape[1],
                         count=1,
-                        dtype=tile_data.dtype,
+                        dtype=rasterio.float32,
                         crs=crs,
                         transform=tile_transform,
                         nodata=nodata
@@ -86,4 +87,4 @@ def split_tif(input_path, output_dir, tile_size, overlap):
 
 
 if __name__ == '__main__':
-    split_tif(input_path=r'C:\Users\Kevin\Desktop\result\test_30_copernicus.tif', output_dir=r'C:\Users\Kevin\Desktop\result\Copernicus_30', tile_size=50, overlap=1)
+    split_tif(input_path=r'C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_30_WMG\WMG.tif', output_dir=r'C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_tfasr\tiles', tile_size=63, overlap=1)

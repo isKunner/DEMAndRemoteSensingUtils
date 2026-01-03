@@ -193,8 +193,8 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
 
 
 if __name__ == "__main__":
-    input_folder = r"C:\Users\Kevin\Desktop\result\Copernicus_10"
-    output_file = r"C:\Users\Kevin\Desktop\result\test_30_copernicus_temp.tif"
+    input_folder = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_tfasr\sr_30m_to_10m"
+    output_file = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_tfasr\test_30_copernicus_temp.tif"
 
     merge_geo_referenced_tifs(
         input_dir=input_folder,
