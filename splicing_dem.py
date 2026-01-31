@@ -9,16 +9,22 @@ import os
 import numpy as np
 import rasterio
 
+
 def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
     """
     自定义拼接统一坐标系TIF，支持重叠区域平均值
     """
     # 1. 收集所有TIF文件
-    tif_files = [
-        os.path.join(input_dir, f)
-        for f in os.listdir(input_dir)
-        if f.lower().endswith('.tif') and os.path.isfile(os.path.join(input_dir, f))
-    ]
+
+    if isinstance(input_dir, str):
+
+        tif_files = [
+            os.path.join(input_dir, f)
+            for f in os.listdir(input_dir)
+            if f.lower().endswith('.tif') and os.path.isfile(os.path.join(input_dir, f))
+        ]
+    elif isinstance(input_dir, list):
+        tif_files = input_dir
 
     if not tif_files:
         raise ValueError(f"输入文件夹 {input_dir} 未找到TIF文件")
@@ -192,12 +198,75 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
         ds.close()
 
 
-if __name__ == "__main__":
-    input_folder = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_tfasr\sr_30m_to_10m"
-    output_file = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_tfasr\test_30_copernicus_temp.tif"
+def merge_geo_referenced_tifs_by_group(input_dir, output_prefix, n_groups=2, overlap_strategy='mean'):
+    """
+    将目录中的tif按数量分成n组，每组单独合并
+    生成 output_prefix_part1.tif, output_prefix_part2.tif ...
+    """
+    import math
 
-    merge_geo_referenced_tifs(
-        input_dir=input_folder,
-        output_path=output_file,
-        overlap_strategy='mean'
-    )
+    # 收集所有文件
+    all_files = sorted([
+        os.path.join(input_dir, f) for f in os.listdir(input_dir)
+        if f.lower().endswith('.tif') and os.path.isfile(os.path.join(input_dir, f))
+    ])
+
+    if not all_files:
+        return []
+
+    total = len(all_files)
+    files_per_group = math.ceil(total / n_groups)
+    output_files = []
+
+    for group_idx in range(n_groups):
+        start_idx = group_idx * files_per_group
+        end_idx = min(start_idx + files_per_group, total)
+        group_files = all_files[start_idx:end_idx]
+
+        if not group_files:
+            continue
+
+        output_file = f"{output_prefix}_part{group_idx + 1}.tif"
+        output_files.append(output_file)
+
+        if os.path.exists(output_file):
+            print(f"第{group_idx + 1}组已存在: {output_file}")
+            continue
+
+        print(f"生成第{group_idx + 1}组: {len(group_files)}个文件 -> {output_file}")
+
+        # 直接调用原函数，传入file_list
+        merge_geo_referenced_tifs(
+            input_dir=group_files,
+            output_path=output_file,
+            overlap_strategy=overlap_strategy
+        )
+
+    return output_files
+
+
+if __name__ == "__main__":
+    # Test目录路径
+    test_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\remote_img_results\original\vitl"
+
+    # 遍历Test目录下的所有子文件夹
+    for folder_name in os.listdir(test_dir):
+        folder_path = os.path.join(test_dir, folder_name)
+
+        # 检查是否为文件夹
+        if os.path.isdir(folder_path):
+            # 设置输出文件路径
+            output_file = os.path.join(test_dir, f"{folder_name}.tif")
+
+            print(f"正在处理文件夹: {folder_name}")
+
+            # 调用拼接函数
+            merge_geo_referenced_tifs(
+                input_dir=folder_path,
+                output_path=output_file,
+                overlap_strategy='mean'
+            )
+
+            print(f"拼接完成: {output_file}")
+
+    print("所有文件夹处理完毕！")

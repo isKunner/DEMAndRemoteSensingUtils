@@ -116,6 +116,7 @@ def bfs_upstream_elevation(
     len_start_lonlat_idx = len(start_lonlat_idx)
     if len_start_lonlat_idx == 0:
         # 注意：返回值要匹配函数声明（新增height_increment）
+        print("⚠️ 起始几何无有效像素")
         return start_geom, 0.0, 0.0, np.zeros_like(dem_data, dtype=bool)
 
     # 2. 初始化BFS（栅格索引：lat_idx=纬度方向行号，lon_idx=经度方向列号）
@@ -173,10 +174,11 @@ def bfs_upstream_elevation(
     pixel_area = res_x * res_y  # 单个像素的面积（平方米）
     slope = 0.0021  # 斜率：每米距离提升0.21米高程
     limit = int(limit_area/pixel_area)
-
     test_limit = 0
+    test_loop_1 = 0
 
     while queue:
+
         lat_idx, lon_idx = queue.popleft()
         loop_count += 1
 
@@ -191,13 +193,16 @@ def bfs_upstream_elevation(
         # 过滤无效值 + 高程≥淤积面的栅格（只保留需要填充的区域）
         tolerance = 0.05  # 容差值，确保0.1以内的差异能正确比较
         current_elev = height_increment[lat_idx][lon_idx]
-        if dem_data[lat_idx, lon_idx] == dem_nodata or dem_data[lat_idx, lon_idx] >= max_elev + current_elev - tolerance:
+        if dem_data[lat_idx, lon_idx] == dem_nodata or dem_data[lat_idx, lon_idx] >= max_elev + current_elev + tolerance:
             continue
         if dem_data[lat_idx, lon_idx] < min_elev - 2:
             test_limit += 1
             continue
 
+        test_loop_1 += 1
+
         if len(valid_lonlat_idx) * 0.2 < test_limit:
+            print("⚠️ 像素太普遍偏低")
             return start_geom, 0.0, 0.0, np.zeros_like(dem_data, dtype=bool)
 
         # 记录有效栅格索引
@@ -218,6 +223,9 @@ def bfs_upstream_elevation(
 
     if len(valid_lonlat_idx) - len_start_lonlat_idx <= 1:
         # 注意：返回值要匹配函数声明（新增height_increment）
+        print("⚠️ 没有扩展坝以外的像素点，或者范围极小")
+        print(f"共循环: {loop_count}, 未因高程值过高或过低而进入的循环次数：{test_loop_1}，即未进入循环有: {loop_count-test_loop_1}次, 高程值过低有: {test_limit}次")
+        print(f"扩展的数量：{len(valid_lonlat_idx)}, 原来的数量: {len_start_lonlat_idx}")
         return start_geom, 0.0, 0.0, np.zeros_like(dem_data, dtype=bool)
 
     # 4. 计算控制面积（㎡）
@@ -252,7 +260,7 @@ def bfs_upstream_elevation(
 
     print(f"总库容：{total_volume:.2f} 立方米")
 
-    # 6. 修复几何范围生成逻辑（核心！基于有效栅格的轮廓生成正确多边形）
+    # 6. 几何范围生成逻辑（核心！基于有效栅格的轮廓生成正确多边形）
     control_polygon = start_geom  # 默认值：无有效栅格时返回起始几何
     if len(valid_lonlat_idx) >= 3:  # 至少3个点才能生成多边形
         # 步骤1：提取有效栅格的行列范围（最小/最大行列号），只处理局部区域

@@ -851,10 +851,10 @@ def downsample_directory_advanced(input_dir, output_dir, factor=2,
 if __name__ == '__main__':
     # 示例使用
     target_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\WMG\WMG.tif"
-    input_path = r"C:\Users\Kevin\Documents\PythonProject\CheckDam\Datasets\Test\Copernicus_30_WMG\WMG.tif"
-    output_path = r"C:\Users\Kevin\Documents\ResearchData\WangMao\30_to_10_Copernicus_WMG.tif"
+    input_path = r"C:\Users\Kevin\Desktop\算法+数据\xng_study_area.tif"
+    output_path = r"C:\Users\Kevin\Desktop\算法+数据\10m\xng_study_area_10m.tif"
 
-    upsample_geography_data(input_path, output_path)
+    resample_to_target_resolution(input_path, output_path, target_resolution=10)
 
     # 使用最优的统一分辨率函数
     # unify_dem(input_path, target_path, output_path, buffer_pixels=1)

@@ -30,7 +30,7 @@ def pixel_to_geo_coords(x_pixel: float, y_pixel: float, geotransform: List[float
 def get_geotransform_and_crs(tif_path: str) -> Tuple[Optional[List[float]], Optional[str]]:
     """
     Get geotransform and CRS information from a TIFF file
-    :param tif_path: Path to the TIFF file
+    :param tif_path: LocalPath to the TIFF file
     :return: Tuple of (geotransform, crs_wkt) or (None, None) if failed
     """
     try:

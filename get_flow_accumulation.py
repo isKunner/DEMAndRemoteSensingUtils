@@ -41,8 +41,8 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, visibl
     wbt = whitebox.WhiteboxTools()
     if wbt_exe_dir is not None:
         wbt.exe_path = wbt_exe_dir
-    if not os.path.exists(wbt_exe_dir):
-        raise FileNotFoundError(f"The specified WhiteboxTools executable directory does not exist: {wbt_exe_dir}")
+        if not os.path.exists(wbt_exe_dir):
+            raise FileNotFoundError(f"The specified WhiteboxTools executable directory does not exist: {wbt_exe_dir}")
 
     wbt.verbose = visible  # 关闭冗余日志
 
@@ -85,6 +85,8 @@ def calculate_flow_accumulation(dem_path, flow_accum_path, temp_dir=None, visibl
             error_msg += " (Unsupported data type)"
         elif fill_result1 == 32:
             error_msg += " (Timeout error)"
+        print(f"dem_path: {dem_path}")
+        print(f"intermediate_fill_path: {intermediate_fill_path}")
         raise RuntimeError(error_msg)
 
     close_tiff_handle(intermediate_fill_path)

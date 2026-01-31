@@ -6,8 +6,138 @@
 # @Describe: 地理坐标系的处理工具
 import os
 import glob
+import shutil
+import subprocess
+import sys
+
 import geopandas as gpd
 from osgeo import osr, gdal
+import rasterio
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+
+
+def add_vertical_datum_with_backup(tif_path, vertical_datum="EGM2008"):
+    """
+    安全地为 GeoTIFF DEM 添加垂直基准：
+    - 自动备份原文件（仅当备份不存在时）
+    - 修改原文件的 CRS 元数据（不改变像素值）
+    - 支持 EGM2008 或 EGM96
+    """
+    if not os.path.exists(tif_path):
+        raise FileNotFoundError(f"输入文件不存在: {tif_path}")
+
+    # 1. 确定复合 CRS
+    crs_map = {
+        "EGM2008": "EPSG:4326+3855",
+        "EGM96": "EPSG:4326+5773"
+    }
+    if vertical_datum not in crs_map:
+        raise ValueError("仅支持 'EGM2008' 或 'EGM96'")
+    compound_crs = crs_map[vertical_datum]
+
+    # 2. 自动创建备份（如果还没有）
+    backup_path = tif_path.replace(".tif", "_backup.tif")
+    if not os.path.exists(backup_path):
+        print(f"📁 正在创建备份: {backup_path}")
+        shutil.copy2(tif_path, backup_path)
+        print("✅ 备份完成！")
+    else:
+        print(f"ℹ️ 备份已存在，跳过: {backup_path}")
+
+    # 3. 找到 gdal_edit.py
+    if sys.platform == "win32":
+        gdal_edit = os.path.join(os.path.dirname(sys.executable), "Scripts", "gdal_edit.py")
+    else:
+        gdal_edit = os.path.join(os.path.dirname(sys.executable), "gdal_edit.py")
+
+    if not os.path.exists(gdal_edit):
+        gdal_edit = "gdal_edit.py"  # 假设在 PATH 中
+
+    # 4. 执行 gdal_edit
+    cmd = [sys.executable, gdal_edit, "-a_srs", compound_crs, tif_path]
+    print(f"\n🔧 正在为 {os.path.basename(tif_path)} 添加垂直基准: {vertical_datum}")
+    print(f"命令: {' '.join(cmd)}")
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("✅ 垂直基准已成功添加！")
+        print(f"📌 文件现在使用复合 CRS: {compound_crs}")
+    else:
+        print("❌ GDAL 命令失败:")
+        print(result.stderr)
+        print("\n⚠️ 但你的原始数据是安全的！备份位于:")
+        print(backup_path)
+        raise RuntimeError("添加垂直基准失败")
+
+
+def reproject_raster_file(input_path, output_path, target_crs):
+    """
+    Reprojects a raster file (e.g., GeoTIFF) to a new coordinate reference system (CRS).
+
+    Args:
+        input_path (str): LocalPath to the input raster file (.tif, .tiff).
+        output_path (str): LocalPath where the reprojected file will be saved.
+        target_crs (str or int): Target CRS in EPSG code (int) or WKT string (str).
+                                 Example: 4326 for WGS84 (lat/lon), 3857 for Web Mercator.
+    """
+    print(f"Reading input file: {input_path}")
+    with rasterio.open(input_path) as src:
+        # 1. Get source CRS and other properties
+        src_crs = src.crs
+        src_transform = src.transform
+        src_width = src.width
+        src_height = src.height
+        src_count = src.count  # Number of bands
+        src_dtype = src.dtypes[0]  # Data type (e.g., float32, uint16)
+
+        print(f"Source CRS: {src_crs}")
+        print(f"Source dimensions: {src_width} x {src_height}")
+        print(f"Source data type: {src_dtype}")
+
+        # 2. Calculate the transform and dimensions for the destination
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            src_crs, target_crs, src_width, src_height, *src.bounds
+        )
+
+        print(f"Target CRS: {target_crs}")
+        print(f"Calculated destination dimensions: {dst_width} x {dst_height}")
+        print(f"Calculated destination transform: {dst_transform}")
+
+    # Ensure the output directory exists
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        print(f"Created output directory: {output_dir}")
+
+    # 3. Open source again and create destination dataset for writing
+    print(f"Starting reprojection...")
+    with rasterio.open(input_path) as src:
+        # Prepare metadata for the output dataset
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': target_crs,
+            'transform': dst_transform,
+            'width': dst_width,
+            'height': dst_height
+        })
+
+        # Open output file for writing
+        with rasterio.open(output_path, 'w', **kwargs) as dst:
+            # Iterate over all bands (if there are multiple)
+            for i in range(1, src_count + 1):
+                # Reproject each band individually
+                reproject(
+                    source=rasterio.band(src, i),  # Source band
+                    destination=rasterio.band(dst, i),  # Destination band
+                    src_transform=src_transform,
+                    src_crs=src_crs,
+                    dst_transform=dst_transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest  # Choose appropriate resampling method
+                )
+    print("Reprojection completed successfully!")
+
 
 def batch_set_coordinate_system(tif_dir, srs_name="WGS84"):
     """
@@ -324,3 +454,16 @@ def transform_coordinates(transform_func, x, y, z=0):
         return tx, ty
     except Exception as e:
         raise RuntimeError(f"坐标转换执行失败 (x={x}, y={y}): {str(e)}")
+
+if __name__ == "__main__":
+    # Define your paths and target CRS
+    input_file = r"C:\Users\Kevin\Documents\ResearchData\Copernicus\Loess_Plateau_Copernicus.tif"           # Replace with your input TIF file path
+    output_file = r"C:\Users\Kevin\Documents\ResearchData\ZhouTun\zhou_tun_gou_WGS84.tif"         # Replace with your desired output TIF file path
+    target_epsg_code = 4326                               # Replace with your target EPSG code (e.g., 3857, 2154, etc.)
+
+    try:
+        add_vertical_datum_with_backup(input_file, vertical_datum="EGM2008")
+        print("\n🎉 操作成功完成！")
+    except Exception as e:
+        print(f"\n💥 发生错误: {e}")
+        sys.exit(1)
