@@ -3,223 +3,303 @@
 # @FileName: split_shp
 # @Time    : 2026/1/24 15:32
 # @Author  : Kevin
-# @Describe: 裁剪Shp文件，因为平台上传有大小限制
+# @Describe: Split dams by US states and reorganize corresponding DEM files
 
 import os
+import shutil
 import geopandas as gpd
+import pandas as pd
+
+# US state name to abbreviation mapping (UPPERCASE)
+state_to_abbr = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY",
+    "american samoa": "AS", "district of columbia": "DC", "guam": "GU",
+    "puerto rico": "PR", "commonwealth of the northern mariana islands": "MP",
+    "united states virgin islands": "VI"
+}
 
 
-def split_shp_by_us_regions(input_shp_path, states_shp_path, output_dir):
+def split_dams_by_states(all_dams_shp_path, states_shp_path, output_base_dir):
     """
-    将SHP文件根据美国州区域分组进行拆分
-
+    Split dams SHP by states using spatial join.
+    Each state's dams are saved in its own subdirectory (e.g., AK/AK.shp)
+    
     Args:
-        input_shp_path (str): 输入SHP文件路径（例如水库数据）
-        states_shp_path (str): 美国州边界SHP文件路径，包含REGION和DIVISION字段
-        output_dir (str): 输出目录
+        all_dams_shp_path (str): Path to complete dams SHP file (e.g., GeoDAR_v11_dams.shp)
+        states_shp_path (str): Path to US states boundary SHP file
+        output_base_dir (str): Base output directory (e.g., USA_DAM_ByStates)
 
     Returns:
-        list: 生成的所有输出文件路径
+        dict: Dictionary mapping state_abbr -> output_shp_path
     """
-    # 读取输入SHP文件
-    print(f"读取输入SHP文件: {os.path.basename(input_shp_path)}")
-    input_gdf = gpd.read_file(input_shp_path)
-
-    # 读取美国州边界文件
-    print(f"读取美国州边界文件: {os.path.basename(states_shp_path)}")
+    print(f"\nReading dams SHP: {all_dams_shp_path}")
+    dams_gdf = gpd.read_file(all_dams_shp_path)
+    print(f"Total dams: {len(dams_gdf)}")
+    
+    print(f"\nReading states SHP: {states_shp_path}")
     states_gdf = gpd.read_file(states_shp_path)
-
-    # 检查是否包含必要的字段
-    required_fields = ['REGION', 'DIVISION', 'NAME']
-    if not all(field in states_gdf.columns for field in required_fields):
-        raise ValueError(f"州边界文件必须包含以下字段: {required_fields}")
-
-    print(f"输入数据包含 {len(input_gdf)} 个要素")
-    print(f"州边界数据包含 {len(states_gdf)} 个州")
-
-    # 检查坐标系，如果不一致则转换
-    if not input_gdf.crs.equals(states_gdf.crs):
-        print(f"坐标系不一致，将州边界数据转换为输入数据的坐标系: {input_gdf.crs}")
-        states_gdf = states_gdf.to_crs(input_gdf.crs)
-
-    # 为每个输入要素分配所属州
-    print("执行空间连接，确定每个要素所属的州...")
-    joined_gdf = gpd.sjoin(input_gdf, states_gdf[['REGION', 'DIVISION', 'NAME', 'geometry']],
-                           how='inner', predicate='intersects')
-    joined_gdf = joined_gdf.rename(columns={'NAME_right': 'NAME', 'REGION_right': 'REGION', 'DIVISION_right': 'DIVISION'})
-    print(f"空间连接完成，{len(joined_gdf)} 个要素被分配到州")
-
-    # 创建州分组策略
-    # 1. 按REGION和DIVISION分组
-    # 2. 优先将同一REGION的州放在同一组
-    # 3. 每组3个州，其中两组4个州
-    print("创建州分组策略...")
-
-    # 获取每个州的要素数量，用于平衡分组
-    state_counts = joined_gdf['NAME'].value_counts().reset_index()
-    state_counts.columns = ['NAME', 'count']
-
-    # 将计数合并回州数据
-    states_with_counts = states_gdf[['NAME', 'REGION', 'DIVISION']].merge(
-        state_counts, on='NAME', how='left'
-    ).fillna(0)
-
-    # 按REGION和DIVISION排序
-    states_sorted = states_with_counts.sort_values(['REGION', 'DIVISION', 'NAME'])
-
-    # 创建分组
-    groups = {}
-    group_id = 1
-
-    # 首先按REGION分组
-    region_groups = {}
-    for region, region_df in states_sorted.groupby('REGION'):
-        # 在每个REGION内按DIVISION分组
-        for division, division_df in region_df.groupby('DIVISION'):
-            # 为当前DIVISION内的州创建组
-            states_in_division = division_df['NAME'].tolist()
-
-            # 将州分配到组
-            for i, state in enumerate(states_in_division):
-                if i % 3 == 0 and i > 0:  # 每3个州创建一个新组
-                    group_id += 1
-
-                if group_id not in groups:
-                    groups[group_id] = []
-
-                groups[group_id].append(state)
-
-    # 调整组大小，确保大部分组有3个州，只有两组有4个州
-    # 首先，将所有组扁平化为州列表
-    all_states = []
-    for group_id, states in groups.items():
-        all_states.extend(states)
-
-    # 重新分组，确保每组3-4个州
-    groups = {}
-    group_id = 1
-    current_group = []
-
-    for state in all_states:
-        current_group.append(state)
-
-        # 除最后两组外，每组3个州
-        if len(current_group) == 3 and group_id <= 14:
-            groups[group_id] = current_group.copy()
-            current_group = []
-            group_id += 1
-        # 最后两组每组4个州
-        elif len(current_group) == 4 and group_id > 14:
-            groups[group_id] = current_group.copy()
-            current_group = []
-            group_id += 1
-
-    # 处理剩余的州
-    if current_group:
-        if group_id <= 14:
-            # 将剩余州分配给前面的组
-            for state in current_group:
-                if group_id <= 14:
-                    groups.setdefault(group_id, []).append(state)
-                    group_id += 1
-                else:
-                    # 将其余州分配给最后一组
-                    groups.setdefault(16, []).append(state)
-        else:
-            groups.setdefault(group_id, []).extend(current_group)
-
-    # 确保有16个组
-    while len(groups) < 16:
-        groups[len(groups) + 1] = []
-
-    # 打印分组信息
-    print("\n州分组方案:")
-    total_states = 0
-    for gid, states in groups.items():
-        total_states += len(states)
-        region_info = []
-        for state in states:
-            region = states_sorted[states_sorted['NAME'] == state]['REGION'].values[0]
-            region_info.append(f"{state}({region})")
-        print(f"组 {gid} ({len(states)}个州): {', '.join(region_info)}")
-    print(f"总共分组了 {total_states} 个州")
-
-    # 确保输出目录存在
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 为每个组创建输出文件
-    output_files = []
-
-    print("\n开始创建分组文件...")
-    for group_id, states in groups.items():
-        if not states:  # 跳过空组
+    
+    # Find state name column
+    state_name_col = None
+    for col in ['NAME', 'STATE_NAME', 'name', 'state_name', 'State']:
+        if col in states_gdf.columns:
+            state_name_col = col
+            break
+    
+    if not state_name_col:
+        raise ValueError(f"Cannot find state name column. Available: {list(states_gdf.columns)}")
+    
+    print(f"Found {len(states_gdf)} states/territories")
+    
+    # Ensure CRS match
+    if not dams_gdf.crs.equals(states_gdf.crs):
+        print(f"Converting states CRS to match dams CRS...")
+        states_gdf = states_gdf.to_crs(dams_gdf.crs)
+    
+    # Rename dams NAME column if exists to avoid conflict
+    if 'NAME' in dams_gdf.columns:
+        dams_gdf = dams_gdf.rename(columns={'NAME': 'DAM_NAME'})
+    
+    # Spatial join: assign each dam to a state
+    print("\nPerforming spatial join...")
+    joined = gpd.sjoin(
+        dams_gdf,
+        states_gdf[[state_name_col, 'geometry']],
+        how='left',
+        predicate='intersects'
+    )
+    
+    # Rename state column
+    if state_name_col != 'STATE_NAME':
+        joined = joined.rename(columns={state_name_col: 'STATE_NAME'})
+    
+    # Remove index_right if exists
+    if 'index_right' in joined.columns:
+        joined = joined.drop(columns=['index_right'])
+    
+    # Get unique states
+    unique_states = joined['STATE_NAME'].dropna().unique()
+    print(f"Dams distributed across {len(unique_states)} states/territories")
+    
+    os.makedirs(output_base_dir, exist_ok=True)
+    output_files = {}
+    
+    for state_name in sorted(unique_states):
+        # Get dams for this state
+        state_dams = joined[joined['STATE_NAME'] == state_name].copy()
+        
+        if len(state_dams) == 0:
             continue
-
-        print(f"\n处理组 {group_id}，包含州: {', '.join(states)}")
-
-        # 获取属于当前组的要素
-        group_gdf = joined_gdf[joined_gdf['NAME'].isin(states)].copy()
-
-        print(f"  该组包含 {len(group_gdf)} 个要素")
-
-        if not group_gdf.empty:
-            # 特殊处理：第15组需要拆分成两个文件
-            if group_id == 13:
-                print(f"  注意: 组 {group_id} 需要拆分成两个文件")
-
-                # 将数据拆分成两半
-                half_index = len(group_gdf) // 2
-                group_gdf_1 = group_gdf.iloc[:half_index].copy()
-                group_gdf_2 = group_gdf.iloc[half_index:].copy()
-
-                # 创建组输出目录
-
-
-                # 生成输出文件名 - 添加_1和_2后缀
-                input_name = os.path.splitext(os.path.basename(input_shp_path))[0]
-
-                # 第一个文件
-                group_dir_1 = os.path.join(output_dir, f"group_{group_id}_1")
-                os.makedirs(group_dir_1, exist_ok=True)
-                output_filename_1 = f"{input_name}_group{group_id}_1.shp"
-                output_path_1 = os.path.join(group_dir_1, output_filename_1)
-                group_gdf_1.drop(columns=['index_right'], errors='ignore').to_file(output_path_1)
-                print(f"  已创建 {output_filename_1}，包含 {len(group_gdf_1)} 个要素")
-                output_files.append(output_path_1)
-
-                # 第二个文件
-                group_dir_2 = os.path.join(output_dir, f"group_{group_id}_2")
-                os.makedirs(group_dir_2, exist_ok=True)
-                output_filename_2 = f"{input_name}_group{group_id}_2.shp"
-                output_path_2 = os.path.join(group_dir_2, output_filename_2)
-                group_gdf_2.drop(columns=['index_right'], errors='ignore').to_file(output_path_2)
-                print(f"  已创建 {output_filename_2}，包含 {len(group_gdf_2)} 个要素")
-                output_files.append(output_path_2)
-
-            else:
-                # 创建组输出目录
-                group_dir = os.path.join(output_dir, f"group_{group_id}")
-                os.makedirs(group_dir, exist_ok=True)
-
-                # 生成输出文件名
-                input_name = os.path.splitext(os.path.basename(input_shp_path))[0]
-                output_filename = f"{input_name}_group{group_id}.shp"
-                output_path = os.path.join(group_dir, output_filename)
-
-                # 保存到文件
-                group_gdf.drop(columns=['index_right'], errors='ignore').to_file(output_path)
-                print(f"  已创建 {output_filename}")
-                output_files.append(output_path)
-        else:
-            print(f"  警告: 组 {group_id} 没有包含任何要素，跳过创建文件")
-
-    print(f"\n处理完成，共生成 {len(output_files)} 个输出文件")
+        
+        # Get state abbreviation
+        state_abbr = state_to_abbr.get(str(state_name).lower())
+        if not state_abbr:
+            state_key = str(state_name).replace(' ', '_').lower()
+            state_abbr = state_to_abbr.get(state_key)
+        if not state_abbr:
+            state_abbr = str(state_name).replace(' ', '_').upper()
+        
+        # Create state subdirectory
+        state_dir = os.path.join(output_base_dir, state_abbr)
+        os.makedirs(state_dir, exist_ok=True)
+        
+        # Reset index to get sequential IDs (0, 1, 2, ...)
+        state_dams = state_dams.reset_index(drop=True)
+        
+        # Save state's dams SHP
+        output_path = os.path.join(state_dir, f"{state_abbr}.shp")
+        state_dams.to_file(output_path)
+        output_files[state_abbr] = output_path
+        print(f"  {state_abbr}: {len(state_dams)} dams -> {output_path}")
+    
+    print(f"\nTotal {len(output_files)} state dam SHP files created in {output_base_dir}")
     return output_files
 
 
-if __name__ == '__main__':
-    input_shp = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\GeoDAR_v11_dams_of_USA\GeoDAR_v11_dams_of_USA.shp"
-    states_shp = r"C:\Users\Kevin\Documents\ResearchData\RangeOfUSA\States.shp"
-    output_dir = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\USA_DAM_ByRegion"
+def reorganize_dems_by_state(
+    dams_by_region_dir,
+    dem_base_dirs,
+    output_dem_base_dir
+):
+    """
+    Reorganize DEM files by state based on dam SHP files.
+    
+    For each dam in SHP (with ID and Name fields):
+    - Find corresponding TIF in {dem_base_dir}/{group_name}/{id}.tif
+    - Copy to {output_dem_base_dir}/{dem_type}/{state_abbr}/{id}.tif
+    - Also save state-specific SHP files
+    
+    Args:
+        dams_by_region_dir: Path to USA_DAM_ByRegion directory with group folders
+        dem_base_dirs: Dict of {dem_type: dem_base_path}
+        output_shp_dir: Output directory for state SHP files
+        output_dem_base_dir: Output directory for reorganized DEMs
+    """
+    print("=" * 60)
+    print("Reorganizing DEMs by state")
+    print("=" * 60)
+    
+    # Stats
+    stats = {
+        'groups_processed': 0,
+        'dams_processed': 0,
+        'dems_copied': {dem_type: 0 for dem_type in dem_base_dirs.keys()},
+        'errors': []
+    }
+    
+    # Create output directory
+    os.makedirs(output_dem_base_dir, exist_ok=True)
+    
+    # Dictionary to track next ID for each state
+    state_next_id = {}
+    
+    # Get all group directories
+    group_dirs = [d for d in os.listdir(dams_by_region_dir)
+                  if d.startswith('group_') and os.path.isdir(os.path.join(dams_by_region_dir, d))]
+    
+    print(f"Found {len(group_dirs)} group directories")
+    
+    for group_dir in sorted(group_dirs):
+        group_path = os.path.join(dams_by_region_dir, group_dir)
+        shp_files = [f for f in os.listdir(group_path) if f.endswith('.shp')]
+        
+        for shp_file in shp_files:
+            shp_path = os.path.join(group_path, shp_file)
+            
+            # Extract group name from filename (e.g., GeoDAR_v11_dams_of_USA_group1.shp -> GeoDAR_v11_dams_of_USA_group1)
+            group_name = shp_file.replace('.shp', '')
+            
+            print(f"\nProcessing: {group_name}")
+            
+            # Read SHP
+            gdf = gpd.read_file(shp_path)
+            stats['groups_processed'] += 1
+            
+            # Find state name column
+            state_col = None
+            for col in ['Name', 'NAME', 'name', 'State', 'STATE']:
+                if col in gdf.columns:
+                    state_col = col
+                    break
+            
+            if not state_col:
+                print(f"  Warning: No state name column found in {shp_file}, skipping")
+                continue
+            
+            print(f"  Dams in this group: {len(gdf)}")
+            
+            # Process each dam (idx is the old_id in group SHP)
+            for idx, row in gdf.iterrows():
+                old_id = idx  # Original ID in group SHP (matches TIF filename)
+                state_name = row[state_col]
+                
+                if pd.isna(state_name):
+                    continue
+                
+                # Get state abbreviation
+                state_abbr = state_to_abbr.get(str(state_name).lower())
+                if not state_abbr:
+                    state_abbr = str(state_name).replace(' ', '_').upper()
+                
+                # Get new sequential ID for this state (starting from 0)
+                if state_abbr not in state_next_id:
+                    state_next_id[state_abbr] = 0
+                new_id = state_next_id[state_abbr]
+                state_next_id[state_abbr] += 1
+                
+                # Copy DEM files for this dam, rename to new_id
+                for dem_type, dem_base_dir in dem_base_dirs.items():
+                    # Source: {dem_base_dir}/{group_name}/{old_id}.tif
+                    src_path = os.path.join(dem_base_dir, group_name, f"{old_id}.tif")
+                    
+                    # Handle CopernicusDEM _paired suffix
+                    if dem_type == 'CopernicusDEM' and not os.path.exists(src_path):
+                        src_path = os.path.join(dem_base_dir, group_name + '_paired', f"{old_id}.tif")
+                    
+                    if os.path.exists(src_path):
+                        # Destination: {output_dem_base_dir}/{dem_type}/{state_abbr}/{new_id}.tif
+                        state_dem_dir = os.path.join(output_dem_base_dir, dem_type, state_abbr)
+                        os.makedirs(state_dem_dir, exist_ok=True)
+                        
+                        dst_path = os.path.join(state_dem_dir, f"{new_id}.tif")
+                        
+                        try:
+                            shutil.copy2(src_path, dst_path)
+                            stats['dems_copied'][dem_type] += 1
+                        except Exception as e:
+                            stats['errors'].append(f"Error copying {src_path}: {e}")
+                
+                stats['dams_processed'] += 1
+            
+            print(f"  Processed {len(gdf)} dams")
+    
+    # Print summary
+    print("\n" + "=" * 60)
+    print("Summary")
+    print("=" * 60)
+    print(f"Groups processed: {stats['groups_processed']}")
+    print(f"Dams processed: {stats['dams_processed']}")
+    print(f"States with dams: {len(state_next_id)}")
+    print("DEM files copied:")
+    for dem_type, count in stats['dems_copied'].items():
+        print(f"  {dem_type}: {count}")
+    if stats['errors']:
+        print(f"Errors: {len(stats['errors'])}")
+        for err in stats['errors'][:5]:
+            print(f"  - {err}")
+    
+    return stats
 
-    split_shp_by_us_regions(input_shp, states_shp, output_dir)
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("Splitting dams by states and reorganizing DEMs...")
+    print("=" * 60)
+    
+    # Configuration
+    all_dams_shp = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\GeoDAR_v11_dams.shp"
+    states_shp = r"C:\Users\Kevin\Documents\ResearchData\RangeOfUSA\States.shp"
+    dams_by_states_dir = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\USA_DAM_ByStates"
+    
+    dams_by_region_dir = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\USA_DAM_ByRegion"
+    dem_output_dir = r'D:\研究文件\ResearchData\USA_ByState'
+    
+    dem_base_dirs = {
+        'USGSDEM': r'D:\研究文件\ResearchData\USA\USGSDEM',
+        'GoogleRemoteSensing': r'D:\研究文件\ResearchData\USA\GoogleRemoteSensing',
+        'CopernicusDEM': r'D:\研究文件\ResearchData\USA\CopernicusDEM'
+    }
+    
+    # Step 1: Split dams SHP by states using spatial join
+    # Output: USA_DAM_ByStates/AL/AL.shp (contains dams in Alabama), etc.
+    print("\n" + "=" * 60)
+    print("Step 1: Splitting dams by states...")
+    print("=" * 60)
+    state_shp_files = split_dams_by_states(all_dams_shp, states_shp, dams_by_states_dir)
+    
+    # Step 2: Reorganize DEM files by state
+    # Uses USA_DAM_ByRegion/group_* to find DEMs and copy to state folders
+    print("\n" + "=" * 60)
+    print("Step 2: Reorganizing DEM files...")
+    print("=" * 60)
+    stats = reorganize_dems_by_state(
+        dams_by_region_dir,
+        dem_base_dirs,
+        dem_output_dir
+    )
+    
+    print("\n" + "=" * 60)
+    print("All tasks completed!")
+    print("=" * 60)

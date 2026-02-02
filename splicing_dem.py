@@ -247,26 +247,23 @@ def merge_geo_referenced_tifs_by_group(input_dir, output_prefix, n_groups=2, ove
 
 if __name__ == "__main__":
     # Test目录路径
-    test_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\remote_img_results\original\vitl"
+    test_dir = r"C:\Users\Kevin\Desktop\inference_results"
 
-    # 遍历Test目录下的所有子文件夹
-    for folder_name in os.listdir(test_dir):
-        folder_path = os.path.join(test_dir, folder_name)
+    file_list = []
 
-        # 检查是否为文件夹
-        if os.path.isdir(folder_path):
-            # 设置输出文件路径
-            output_file = os.path.join(test_dir, f"{folder_name}.tif")
+    for file in os.listdir(test_dir):
 
-            print(f"正在处理文件夹: {folder_name}")
 
-            # 调用拼接函数
-            merge_geo_referenced_tifs(
-                input_dir=folder_path,
-                output_path=output_file,
-                overlap_strategy='mean'
-            )
+        if file.endswith("HRDEM.tif"):
 
-            print(f"拼接完成: {output_file}")
+            file_list.append(os.path.join(test_dir, file))
+
+    merge_geo_referenced_tifs(
+        input_dir=file_list,
+        output_path=os.path.join(test_dir, f"HRDEM.tif"),
+        overlap_strategy='mean'
+    )
+    print(f"拼接完成: {file}.tif")
+
 
     print("所有文件夹处理完毕！")

@@ -384,7 +384,7 @@ def _process_single_reference_with_source_handle(
             src_window_mask = src_ds.dataset_mask(window=final_window)
             mask_valid_ratio = np.sum(src_window_mask == 255) / src_window_mask.size if src_window_mask.size > 0 else 0
 
-            dst_array = np.full((src_count, ref_height, ref_width), ref_nodata, dtype=src_window_data.dtype)
+            dst_array = np.full((src_count, ref_height, ref_width), src_nodata, dtype=src_window_data.dtype)
 
             for band_idx in range(src_count):
                 reproject(
@@ -396,7 +396,7 @@ def _process_single_reference_with_source_handle(
                     dst_crs=ref_crs,
                     resampling=resampling_method,
                     src_nodata=src_nodata,
-                    dst_nodata=ref_nodata,
+                    dst_nodata=src_nodata,
                     src_mask=src_window_mask if mask_valid_ratio > 0 else np.nan
                 )
 
@@ -423,11 +423,11 @@ def _process_single_reference_with_source_handle(
                     dtype=dst_array.dtype,
                     crs=ref_crs,
                     transform=ref_transform,
-                    nodata=ref_nodata,
+                    nodata=src_nodata,
                     compress='LZW'
             ) as dst:
                 dst.write(dst_array)
-                dst_mask = np.all(dst_array != ref_nodata, axis=0)
+                dst_mask = np.all(dst_array != src_nodata, axis=0)
                 dst.write_mask(dst_mask.astype(rasterio.uint8) * 255)
 
     except Exception as e:
@@ -585,22 +585,22 @@ def merge_sources_to_reference(reference_path, source_paths, output_path,
 
 if __name__ == '__main__':
 
-    reference_path = r"D:\研究文件\ResearchData\USA\GoogleRemoteSensing\GeoDAR_v11_dams_of_USA_group1\0.tif"
-    source_paths = [r"C:\Users\Kevin\Downloads\Edge\USGS_1M_18_x62y457_CT_Statewide_C16.tif", r"C:\Users\Kevin\Downloads\Edge\USGS_one_meter_x62y457_CT_Sandy_2014.tif", r"C:\Users\Kevin\Downloads\Edge\USGS_1M_18_x62y457_NY_FEMAR2_Central_2018_D19.tif"]
-    output_path = r"C:\Users\Kevin\Downloads\Edge\0.tif"
+    # reference_path = r"D:\研究文件\ResearchData\USA\GoogleRemoteSensing\GeoDAR_v11_dams_of_USA_group1\0.tif"
+    # source_paths = [r"C:\Users\Kevin\Downloads\Edge\USGS_1M_18_x62y457_CT_Statewide_C16.tif", r"C:\Users\Kevin\Downloads\Edge\USGS_one_meter_x62y457_CT_Sandy_2014.tif", r"C:\Users\Kevin\Downloads\Edge\USGS_1M_18_x62y457_NY_FEMAR2_Central_2018_D19.tif"]
+    # output_path = r"C:\Users\Kevin\Downloads\Edge\0.tif"
+    #
+    # merge_sources_to_reference(reference_path, source_paths, output_path, dtype=np.float32)
 
-    merge_sources_to_reference(reference_path, source_paths, output_path, dtype=np.float32)
-
-    # source_file = r"C:\Users\Kevin\Documents\ResearchData\Copernicus\Loess_Plateau_Copernicus.tif"
-    # input_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\WMG_2.0m_1024pixel"
-    # output_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\test"
-    # os.makedirs(output_dir, exist_ok=True)
-    # print("开始批量处理目录...")
-    # crop_source_to_reference(
-    #     source_raster_path=source_file,
-    #     reference_inputs=input_dir,  # 传入目录
-    #     output_destination=output_dir,  # 传入目录
-    #     output_suffix="_clipped_dem",
-    #     resampling_method=Resampling.bilinear
-    # )
-    # print("批量处理完成。")
+    source_file = r"C:\Users\Kevin\Documents\ResearchData\Copernicus\Loess_Plateau_Copernicus.tif"
+    input_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\WMG_1.0m_1024pixel"
+    output_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\Copernicus_1.0m_1024pixel"
+    os.makedirs(output_dir, exist_ok=True)
+    print("开始批量处理目录...")
+    crop_source_to_reference(
+        source_raster_path=source_file,
+        reference_inputs=input_dir,  # 传入目录
+        output_destination=output_dir,  # 传入目录
+        output_suffix="",
+        resampling_method=Resampling.nearest
+    )
+    print("批量处理完成。")

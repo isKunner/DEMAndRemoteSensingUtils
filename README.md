@@ -4,28 +4,240 @@
 <br />
 
 <div>
-  <h3 align="center">OperationOfArcGIS</h3>
+  <h3 align="center">DEMAndRemoteSensingUtils</h3>
 
   <p align="center">
-    Various utility modules used in processing Digital Elevation Models (DEMs) and Remote Sensing
+    A Python toolkit for processing Digital Elevation Models (DEMs) and Remote Sensing data
     <br />
-    <a href="https://github.com/isKunner/DEMAndRemoteSensingUtilse">Kevin Chen</a>
+    <a href="https://github.com/isKunner/DEMAndRemoteSensingUtils">View Project</a>
+    ·
+    <a href="#installation">Quick Install</a>
+    ·
+    <a href="#usage-examples">Usage Examples</a>
   </p>
 </div>
 
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li><a href="#about-the-project">About The Project</a></li>
+    <li><a href="#key-features">Key Features</a></li>
+    <li><a href="#project-structure">Project Structure</a></li>
+    <li><a href="#installation">Installation</a></li>
+    <li><a href="#usage-examples">Usage Examples</a></li>
+    <li><a href="#module-documentation">Module Documentation</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#acknowledgments">Acknowledgments</a></li>
+  </ol>
+</details>
 
-## 1. analysis.py
+---
 
-### 1.1. `analyze_two_dems`
+## About The Project
+
+**DEMAndRemoteSensingUtils** is a Python toolkit specifically designed for Digital Elevation Model (DEM) and remote sensing data processing. This toolkit provides a comprehensive set of utility modules covering the entire workflow from data preprocessing, coordinate transformation, image cropping, resampling, mosaicking to hydrological analysis.
+
+### Main Application Scenarios
+
+- 🏞️ **Check Dam Capacity Calculation** - Calculate control area and storage capacity of check dams based on DEM data
+- 🌍 **Coordinate System Transformation** - Support conversion between various geographic and projected coordinate systems
+- 📐 **DEM Data Processing** - Cropping, resampling, mosaicking, splitting, and other operations
+- 💧 **Hydrological Analysis** - Flow accumulation, flow direction calculation, slope length extraction
+- 🗺️ **Shapefile Processing** - Vector data clipping, transformation, splitting, and more
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Key Features
+
+| Feature Category | Description |
+|:-----------------|:------------|
+| **Coordinate Systems** | Support 200+ Coordinate Reference Systems (CRS) with automatic detection and transformation |
+| **High Performance** | Vectorized operations and parallel processing, 100-1000x faster than traditional loops |
+| **Smart Memory Management** | Memory optimization for large raster data with chunk-based processing support |
+| **Multi-Format Support** | Support GeoTIFF, Shapefile, GeoJSON, and other mainstream GIS formats |
+| **Batch Processing** | Directory-level batch processing to improve work efficiency |
+| **Hydrological Analysis** | Integrated WhiteboxTools providing complete hydrological analysis workflow |
+| **Robust Algorithms** | Modified Z-score method for outlier handling to ensure data quality |
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Project Structure
+
+```
+DEMAndRemoteSensingUtils/
+├── 📄 README.md                  # Project documentation
+├── 📄 LICENSE                    # MIT License
+├── 📄 __init__.py                # Package initialization file
+│
+├── 🔧 Core Utilities
+│   ├── utils.py                  # Basic I/O and coordinate conversion tools
+│   ├── coordinate_system.py      # Coordinate system processing
+│   └── get_information.py        # Raster information extraction
+│
+├── ✂️ Cropping and Splitting
+│   ├── crop_dem_from_cordinate.py    # Crop DEM by coordinates
+│   ├── crop_dem_from_dem.py          # Crop by reference DEM
+│   ├── crop_shp_from_shp.py          # Shapefile clipping
+│   ├── split_dem.py                  # DEM tile splitting
+│   └── split_shp.py                  # Shapefile splitting
+│
+├── 🔄 Resampling and Transformation
+│   ├── resize_tif.py             # Resolution adjustment (up/down sampling)
+│   ├── splicing_dem.py           # DEM mosaicking/merging
+│   └── clean_nodata.py           # Clean edge NoData values
+│
+├── 💧 Hydrological Analysis
+│   ├── check_dam_volume.py       # Check dam capacity calculation
+│   ├── get_flow_accumulation.py  # Flow accumulation calculation
+│   ├── get_slope_length.py       # Slope length extraction
+│   └── modify_from_shp.py        # Modify DEM based on Shapefile
+│
+├── 🗺️ Shapefile Processing
+│   ├── convert_shp_format.py     # Shapefile format conversion
+│   ├── generated_shp_from_tif.py # Generate boundary Shapefile from TIF
+│   └── modify_shp.py             # Shapefile attribute modification
+│
+├── 🔧 DEM Modification and Analysis
+│   ├── modify_dem.py             # DEM value modification
+│   ├── analysis.py               # DEM comparison analysis
+│   └── conver_coordinate.py      # Vertical datum conversion
+│
+└── 📁 __pycache__/               # Python cache directory
+```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Installation
+
+### Requirements
+
+- Python >= 3.8
+- GDAL >= 3.0
+- Operating System: Windows / Linux / macOS
+
+### Install Dependencies
+
+```bash
+# Using conda (recommended)
+conda install -c conda-forge rasterio geopandas numpy scipy matplotlib pyproj gdal shapely whitebox
+
+# Or using pip
+pip install rasterio geopandas numpy scipy matplotlib pyproj gdal shapely whitebox
+```
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/isKunner/DEMAndRemoteSensingUtils.git
+cd DEMAndRemoteSensingUtils
+```
+
+### Import the Package
+
+```python
+# Method 1: Import the entire package
+import DEMAndRemoteSensingUtils as dem_utils
+
+# Method 2: Import specific functions
+from DEMAndRemoteSensingUtils import (
+    crop_tif_by_bounds,
+    process_checkdam_capacity,
+    merge_georeferenced_tifs
+)
+```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Usage Examples
+
+### Example 1: Crop DEM Data
+
+```python
+from DEMAndRemoteSensingUtils import crop_tif_by_bounds
+
+# Crop DEM by latitude/longitude bounds
+crop_tif_by_bounds(
+    input_tif_path="input_dem.tif",
+    output_tif_path="output_dem.tif",
+    lon_min=110.347,
+    lat_min=37.595,
+    lon_max=110.348,
+    lat_max=37.596,
+    buffer_distance_km=2  # Add 2km buffer
+)
+```
+
+### Example 2: Calculate Check Dam Capacity
+
+```python
+from DEMAndRemoteSensingUtils import process_checkdam_capacity
+
+# Calculate control area and capacity of check dams
+process_checkdam_capacity(
+    dem_path="dem.tif",
+    shp_path="check_dams.shp",
+    output_shp_path="check_dams_with_capacity.shp",
+    output_dem_path="dem_with_siltation.tif",
+    slope=0.0021  # Siltation surface slope
+)
+```
+
+### Example 3: Merge Multiple DEM Files
+
+```python
+from DEMAndRemoteSensingUtils import merge_georeferenced_tifs
+
+# Mosaic/merge multiple DEM files
+merge_georeferenced_tifs(
+    input_dir="tiles/",
+    output_path="merged_dem.tif",
+    overlap_strategy='mean'  # Average overlapping regions
+)
+```
+
+### Example 4: Calculate Flow Accumulation
+
+```python
+from DEMAndRemoteSensingUtils import calculate_flow_accumulation
+
+# Calculate flow accumulation based on DEM
+calculate_flow_accumulation(
+    dem_path="dem.tif",
+    flow_accum_path="flow_accumulation.tif",
+    temp_dir="./temp"
+)
+```
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Module Documentation
+
+Below are detailed descriptions of each module's functionality:
+
+### 1. analysis.py
+
+#### 1.1. `analyze_two_dems`
 
 *   **Function**: Compares the differences between two DEMs using statistical methods like the P-test.
 *   **Primary Use Case**: Comparing a super-resolved DEM with its original counterpart.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 2. check_dam_volume.py
+### 2. check_dam_volume.py
 
-### 2.1. `process_checkdam_capacity`
+#### 2.1. `process_checkdam_capacity`
 
 *   **Function**: Calculates check dam capacity (storage volume) and updates DEM output. Only processes 2slope+road/2slope groupings.
 *   **Core Workflow**:
@@ -40,7 +252,7 @@
   - Optimized memory usage (uint8 data types)
   - Handles multiple check dams in batch
 
-### 2.2. `bfs_upstream_elevation`
+#### 2.2. `bfs_upstream_elevation`
 
 *   **Function**: Performs breadth-first search from upstream slope to calculate upstream control range, area, and storage volume.
 *   **Algorithm**: 8-direction BFS with elevation constraints (only processes pixels below siltation surface)
@@ -48,7 +260,7 @@
   - `limit_area`: Maximum siltation area limit (default 5,000,000 m²)
   - `slope`: Height increment slope (0.0021 m elevation increase per meter distance)
 
-### 2.3. `update_dem_precise`
+#### 2.3. `update_dem_precise`
 
 *   **Function**: Precisely updates DEM data (100-1000x speedup) using vectorized operations.
 *   **Optimization**: 
@@ -58,9 +270,9 @@
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 3. clean_nodata.py
+### 3. clean_nodata.py
 
-### 3.1. `remove_nodata_rows_cols`
+#### 3.1. `remove_nodata_rows_cols`
 
 *   **Function**: Removes excess rows and columns containing only NoData values from the edges of a DEM.
 *   **Current Use Case**: Works with DEMs in a geographic coordinate system (non-projected) where the target data area is surrounded by NoData padding.
@@ -80,7 +292,7 @@
     | 1    | 1    | 1    | None |
     ```
 
-### 3.2. Related Knowledge: Affine Transform
+#### 3.2. Related Knowledge: Affine Transform
 
 *   **Description**: An affine transformation matrix defines how pixel coordinates map to geographic/projected coordinates.
 *   **Example (Wangmaogou DEM - Projected Coordinate System)**:
@@ -132,9 +344,9 @@
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 4. conver_coordinate.py
+### 4. conver_coordinate.py
 
-### 4.1. `convert_dem_egm2008_to_navd88_foot`
+#### 4.1. `convert_dem_egm2008_to_navd88_foot`
 
 *   **Function**: Converts DEM from EGM2008 vertical datum (meters) to NAVD88 vertical datum (US Survey Foot), with horizontal CRS synchronized to NAD83 HARN Ohio South.
 *   **Coordinate Systems**:
@@ -148,9 +360,9 @@
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 5. convert_shp_format.py
+### 5. convert_shp_format.py
 
-### 5.1. `points_shp_to_merged_multipolygon`
+#### 5.1. `points_shp_to_merged_multipolygon`
 
 *   **Function**: Converts point SHP files to polygons, then merges them into a single MultiPolygon.
 *   **Process**:
@@ -159,7 +371,7 @@
   3. Merges all polygons into a single MultiPolygon using cascaded_union
 *   **Use Case**: Converting point features (e.g., dam locations) to area features for spatial analysis.
 
-### 5.2. `shp_points_to_polygons`
+#### 5.2. `shp_points_to_polygons`
 
 *   **Function**: Converts point SHP files to buffered polygon GeoJSON (EPSG:4326).
 *   **Features**:
@@ -170,9 +382,9 @@
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 6. coordinate_system.py
+### 6. coordinate_system.py
 
-### 6.1. `create_coordinate_transformer`
+#### 6.1. `create_coordinate_transformer`
 
 *   **Function**: Creates a robust coordinate transformation object to convert a point's location from Coordinate System A to Coordinate System B.
 *   **Core Idea**: Source Location -> Get WGS84 Lat/Lon -> Get Location in Target Coordinate System.
@@ -195,36 +407,36 @@ Additional Features:
 - Issues warnings for potential accuracy loss (e.g., geographic CRS with different datums).
 - Returns both the target CRS object and a unified transformation function: `transform_func(x, y, z=0) -> (tx, ty)`.
 
-### 6.2. `get_shp_wgs84_bounds`
+#### 6.2. `get_shp_wgs84_bounds`
 
-*  **Function**: Reads a Shapefile and returns its bounding box in WGS84 (EPSG:4326) longitude/latitude coordinates.
-*  **Input**: Path to a valid Shapefile (`.shp`).
-Output: `(lon_min, lat_min, lon_max, lat_max)` as floats.
-Behavior:
+*   **Function**: Reads a Shapefile and returns its bounding box in WGS84 (EPSG:4326) longitude/latitude coordinates.
+*   **Input**: Path to a valid Shapefile (`.shp`).
+*   **Output**: `(lon_min, lat_min, lon_max, lat_max)` as floats.
+*   **Behavior**:
 - Raises `FileNotFoundError` if the Shapefile does not exist.
 - Raises `ValueError` if the file is empty or lacks CRS information.
 - Automatically reprojects to EPSG:4326 if the original CRS is not WGS84.
 - Ensures output bounds are always in geographic coordinates suitable for functions expecting latitude/longitude (e.g., `crop_tif_by_bounds`).
 
-### 6.3. `transform_coordinates`
+#### 6.3. `transform_coordinates`
 
 *   **Function**: Executes coordinate transformation using a transformer function returned by `create_coordinate_transformer`.
 *   **Purpose**: Provides a safe, error-handled wrapper for point-wise conversion.
-Usage:
+*   **Usage**:
     ```python
     target_crs, transformer = create_coordinate_transformer(src_srs, target_srs)
     tx, ty = transform_coordinates(transformer, x, y)
     ```
 
-### 6.4. `batch_set_coordinate_system`
+#### 6.4. `batch_set_coordinate_system`
 
 *   **Function**: Assign a coordinate system to TIF files.
 
-### 6.5. `set_coordinate_system_for_tif`
+#### 6.5. `set_coordinate_system_for_tif`
 
-*   **Function**: Assign a coordinate system to the sigle TIF file.
+*   **Function**: Assign a coordinate system to the single TIF file.
 
-### 6.6. `reproject_raster_file`
+#### 6.6. `reproject_raster_file`
 
 *   **Function**: Reprojects a raster file (e.g., GeoTIFF) to a new coordinate reference system (CRS).
 *   **Parameters**:
@@ -233,7 +445,7 @@ Usage:
   - `target_crs`: Target CRS in EPSG code or WKT string
 *   **Features**: Handles multi-band rasters with appropriate resampling methods.
 
-### 6.7. `add_vertical_datum_with_backup`
+#### 6.7. `add_vertical_datum_with_backup`
 
 *   **Function**: Safely adds vertical datum to GeoTIFF DEM with automatic backup creation.
 *   **Supported Datums**: EGM2008, EGM96
@@ -241,9 +453,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 7. crop_dem_from_cordinate.py
+### 7. crop_dem_from_cordinate.py
 
-### 7.1. `add_buffer_to_bounds`
+#### 7.1. `add_buffer_to_bounds`
 
 *   **Function**: Adds a buffer zone around a given bounding box defined by latitude/longitude coordinates.
 *   **Use Case Example**: Super-resolution often degrades edge pixels; cropping a larger area with a buffer allows trimming poor-quality edges after processing.
@@ -252,7 +464,7 @@ Usage:
         *   **Geographic CRS**: Tile spans might be equal in degrees but differ in actual meters.
         *   **Projected CRS**: Calculations based on input lat/lon can lead to inconsistent cropped areas; further refinement needed.
 
-### 7.2. `crop_tif_by_bounds`
+#### 7.2. `crop_tif_by_bounds`
 
 *   **Function**: Crops a TIFF file based on a specified rectangular bounding box.
 *   **Example Workflow**:
@@ -288,9 +500,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 8. crop_dem_from_dem.py
+### 8. crop_dem_from_dem.py
 
-### 8.1. `crop_source_to_reference`
+#### 8.1. `crop_source_to_reference`
 
 *   **Function**: Resamples and crops a target file based on the extent and properties of an already cropped reference TIFF file (ensuring a square output).
 *   **Feature**: Automatically handles coordinate system transformations; the coordinate system of the reference file dictates the output area/crs.
@@ -303,9 +515,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 9. crop_shp_from_shp.py
+### 9. crop_shp_from_shp.py
 
-### 9.1. `clip_points_by_boundary`
+#### 9.1. `clip_points_by_boundary`
 
 *   **Function**: Clips point data by boundary polygon.
 *   **Use Case**: Extracting dam points within US state boundaries.
@@ -315,7 +527,7 @@ Usage:
   3. Creates boundary polygon union for efficiency
   4. Filters points within boundary
 
-### 9.2. `clip_points_by_boundary_with_state_info`
+#### 9.2. `clip_points_by_boundary_with_state_info`
 
 *   **Function**: Clips point data by boundary polygon and retains state information.
 *   **Additional Features**:
@@ -325,23 +537,23 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 10. generated_shp_from_tif.py
+### 10. generated_shp_from_tif.py
 
-### 10.1. `create_boundary_shp_from_dem`
+#### 10.1. `create_boundary_shp_from_dem`
 
 *   **Function**: Generates rectangular boundary SHP file corresponding to TIF file, with rectangle boundaries matching TIF boundaries.
 *   **Output**: Creates single polygon feature representing TIF extent with original CRS.
 
-### 10.2. `batch_create_boundary_shp_from_dir`
+#### 10.2. `batch_create_boundary_shp_from_dir`
 
 *   **Function**: Batch processes TIF files in directory to generate corresponding boundary SHP files.
 *   **Options**: Can save SHP files in same directory as TIF or specify output directory.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 11. get_flow_accumulation.py
+### 11. get_flow_accumulation.py
 
-### 11.1. `calculate_flow_accumulation`
+#### 11.1. `calculate_flow_accumulation`
 
 *   **Function**: Calculates flow accumulation for a DEM using WhiteboxTools.
 *   **Installation Note**: Whitebox actually calls an exe file to execute. After installing the library using pip and executing it, exe will be automatically downloaded, but installing it using conda will not result in errors. After downloading and decompressing using pip, the path may also be incorrect. Selected $0 is enough. You need to manually adjust the location of the directory or the directory where whitebox_tools.exe is defined and displayed. 
@@ -363,23 +575,23 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 12. get_information.py
+### 12. get_information.py
 
-### 12.1. `get_pixel_size_accurate`
+#### 12.1. `get_pixel_size_accurate`
 
 *   **Function**: Calculates the accurate physical size of a raster pixel in meters.
 *   **Logic**:
     *   **Case 1 (Projected CRS)**: Read directly from transform parameters.
     *   **Case 2 (Geographic CRS)**: Transform to UTM (or similar) and calculate the actual ground distance.
 
-### 12.2. `get_tif_latlon_bounds`
+#### 12.2. `get_tif_latlon_bounds`
 
 *   **Function**: Retrieves the bounding box of a TIFF file expressed in WGS84 Latitude/Longitude coordinates.
 *   **Logic**:
     *   **Case 1 (Geographic CRS)**: Read directly.
     *   **Case 2 (Projected CRS)**: Transform extents to WGS84.
 
-### 12.3. `get_crs_transformer`
+#### 12.3. `get_crs_transformer`
 
 *   **Function**: Creates a transformer object for converting coordinates between two specific Coordinate Reference Systems.
 *   **Example**:
@@ -389,33 +601,33 @@ Usage:
     x, y = transformer.transform(lon, lat)
     ```
 
-### 12.4. `geo_to_pixel`
+#### 12.4. `geo_to_pixel`
 
 *   **Function**: Converts geographic coordinates (lat/lon) to image pixel coordinates (row, col).
 
-### 12.5. `pixel_to_geo`
+#### 12.5. `pixel_to_geo`
 
 *   **Function**: Converts image pixel coordinates (row, col) to geographic coordinates (lat/lon).
 
-### 12.6. `pixel_to_pixel`
+#### 12.6. `pixel_to_pixel`
 
 *   **Function**: Converts pixel coordinates from source raster to pixel coordinates in target raster (handles different CRS).
 
-### 12.7. `get_tif_info`
+#### 12.7. `get_tif_info`
 
 *   **Function**: Gets basic attribute information of TIFF raster data.
 *   **Output**: Dictionary containing dimensions, data type, CRS, bounds, transform matrix, statistics, and vertical datum information.
 
-### 12.8. `get_degree_per_meter`
+#### 12.8. `get_degree_per_meter`
 
 *   **Function**: Calculates the degree change per meter distance at given latitude/longitude.
 *   **Use Case**: Useful for buffer calculations in geographic coordinate systems.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 13. modify_dem.py
+### 13. modify_dem.py
 
-### 13.1. `batch_modify_tifs_vectorized`
+#### 13.1. `batch_modify_tifs_vectorized`
 
 *   **Function**: Batch modifies multiple TIF file values using vectorized + parallel processing.
 *   **Core Algorithm**: 
@@ -428,7 +640,7 @@ Usage:
   - Full vectorization and parallelization
   - Supports multi-band rasters
 
-### 13.2. `calculate_robust_min_max_modified_zscore_vectorized`
+#### 13.2. `calculate_robust_min_max_modified_zscore_vectorized`
 
 *   **Function**: Calculates robust min/max using modified Z-score method for 2D/3D arrays.
 *   **Formula**: Modified Z-Score = 0.6745 * (x - median) / MAD
@@ -436,9 +648,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 14. modify_from_shp.py
+### 14. modify_from_shp.py
 
-### 14.1. `check_dam_info_extract`
+#### 14.1. `check_dam_info_extract`
 
 *   **Function**: Complete check dam information extraction workflow (5-step process).
 *   **Steps**:
@@ -453,21 +665,21 @@ Usage:
   - 2 slopes (no road)
   - 1 slope (no road)
 
-### 14.2. `extract_elevation_from_dem`
+#### 14.2. `extract_elevation_from_dem`
 
 *   **Function**: Extracts min/max elevation values from DEM for geometries (optimized batch version).
 *   **Optimization**: Uses batch rasterization instead of per-feature mask for 10-100x speedup.
 
-### 14.3. `update_dem_with_elevation_values`
+#### 14.3. `update_dem_with_elevation_values`
 
 *   **Function**: Generates new DEM based on geometries and 'elev' field (optimized version).
 *   **Features**: Batch rasterization, automatic filtering of invalid features, vectorized update.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 15. modify_shp.py
+### 15. modify_shp.py
 
-### 15.1. `filter_shp`
+#### 15.1. `filter_shp`
 
 *   **Function**: Reads SHP file and filters or removes rows by type field.
 *   **Modes**: 
@@ -477,9 +689,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 16. resize_tif.py
+### 16. resize_tif.py
 
-### 16.1. `unify_dem`
+#### 16.1. `unify_dem`
 
 *   **Function**: Unifies input DEM to match resolution and coordinate system of target DEM (supports multi-band). Can also add buffer.
 *   **Potential Issues**:
@@ -488,26 +700,26 @@ Usage:
     *   Pixel alignment issues between old and new coordinate systems.
 *   **Note**: Minor irregularities might exist but are generally considered negligible for overall calculations.
 
-### 16.2. `resample_to_target_resolution`
+#### 16.2. `resample_to_target_resolution`
 
 *   **Function**: Simple resampling function suitable for projected coordinate systems. Takes desired resolution in meters as input.
 
-### 16.3. `resample_geography_to_target_resolution`
+#### 16.3. `resample_geography_to_target_resolution`
 
 *   **Function**: Resamples a DEM, potentially transforming from a geographic coordinate system to a projected one before resampling.
 *   **⚠️ Warning**: Currently experiencing misalignment issues, possibly due to source data characteristics.
 
-### 16.4. `upsample_geography_data`
+#### 16.4. `upsample_geography_data`
 
 *   **Function**: Upsamples (increases resolution) of data in geographic coordinate system, supporting multi-band.
 *   **Method**: Uses bilinear interpolation to increase resolution by specified factor.
 
-### 16.5. `downsample_tif`
+#### 16.5. `downsample_tif`
 
 *   **Function**: Downsamples (decreases resolution) input TIFF file, supporting multi-band.
 *   **Method**: Uses average pooling (default) or other resampling methods.
 
-### 16.6. `downsample_tif_advanced`
+#### 16.6. `downsample_tif_advanced`
 
 *   **Function**: Advanced downsampling with feature enhancement.
 *   **Steps**:
@@ -516,16 +728,16 @@ Usage:
   3. Downsample using specified resampling method
 *   **Use Case**: Suitable for DEMs where feature preservation is important during downsampling.
 
-### 16.7. `downsample_directory` / `downsample_directory_advanced`
+#### 16.7. `downsample_directory` / `downsample_directory_advanced`
 
 *   **Function**: Batch processes all TIFF files in directory for downsampling.
 *   **Features**: Supports both standard and advanced downsampling modes.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 17. splicing_dem.py
+### 17. splicing_dem.py
 
-### 17.1. `merge_georeferenced_tifs`
+#### 17.1. `merge_georeferenced_tifs`
 
 *   **Function**: Mosaics multiple GeoTIFF files into a single large GeoTIFF, handling overlapping regions. Requires identical coordinate systems, NoData values, etc.
 *   **Implementation Approach**:
@@ -546,9 +758,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 18. split_dem.py
+### 18. split_dem.py
 
-### 18.1. `split_tif`
+#### 18.1. `split_tif`
 
 *   **Function**: Splits a large DEM TIFF file into smaller tiles.
 *   **Implementation Details**:
@@ -558,9 +770,9 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 19. split_shp.py
+### 19. split_shp.py
 
-### 19.1. `split_shp_by_us_regions`
+#### 19.1. `split_shp_by_us_regions`
 
 *   **Function**: Splits SHP file by US state regions (for platform upload size limits).
 *   **Grouping Strategy**:
@@ -571,95 +783,118 @@ Usage:
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## 20. utils.py
+### 20. utils.py
 
-### 20.1. `read_tif`
+#### 20.1. `read_tif`
 
 *   **Function**: Successfully reads common raster attributes: pixel values, affine transform, coordinate reference system, and NoData value.
 
-### 20.2. `write_tif`
+#### 20.2. `write_tif`
 
 *   **Function**: Writes data to a GeoTIFF file using provided core information (data, transform, crs, nodata, etc.).
 
-### 20.3. `pixel_to_geo_coords`
+#### 20.3. `pixel_to_geo_coords`
 
-*   **Function**: This function converts pixel coordinates to geographic coordinates using GDAL's geotransform parameters.`.
+*   **Function**: This function converts pixel coordinates to geographic coordinates using GDAL's geotransform parameters.
 
-### 20.4. `get_geotransform_and_crs`
+#### 20.4. `get_geotransform_and_crs`
 
 *   **Function**: Get geotransform and CRS information from a TIFF file.
 
-### 20.5. `calculate_meters_per_degree_precise`
+#### 20.5. `calculate_meters_per_degree_precise`
 
 *   **Function**: Precisely calculates meters per degree at given longitude/latitude using UTM projection.
 *   **Method**: Uses small offset (delta=0.00001) to calculate actual ground distance.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
-## Installation and Usage
+---
 
-### Requirements
+## Contributing
 
-```bash
-pip install rasterio geopandas numpy scipy matplotlib whitebox pyproj gdal shapely
-```
+We welcome and appreciate any form of contribution! If you'd like to contribute to this project, please follow these steps:
 
-### Importing the Package
+### Development Workflow
 
-```python
-from DEMAndRemoteSensingUtils import (
-    crop_source_to_reference,
-    read_tif, 
-    write_tif,
-    crop_tif_by_bounds,
-    pixel_to_geo_coords,
-    get_geotransform_and_crs,
-    pixel_to_pixel,
-    calculate_meters_per_degree_precise,
-    check_dam_info_extract,
-    filter_shp,
-    process_checkdam_capacity,
-    batch_modify_tifs_vectorized,
-    merge_geo_referenced_tifs
-)
-```
+1. **Fork the Repository** - Create your own fork from the main branch
+2. **Create a Branch** - Create a new branch for your feature or fix (`git checkout -b feature/AmazingFeature`)
+3. **Commit Changes** - Make your modifications and commit (`git commit -m 'Add some AmazingFeature'`)
+4. **Push Branch** - Push to your fork (`git push origin feature/AmazingFeature`)
+5. **Create Pull Request** - Submit a PR to the main repository
 
-### Example Usage
+### Code Standards
 
-```python
-# Example 1: Crop DEM by coordinates
-from DEMAndRemoteSensingUtils import crop_tif_by_bounds
+- Follow PEP 8 Python code style guidelines
+- Add appropriate docstrings for new features
+- Ensure code passes existing tests (if any)
+- Add test cases for new features
 
-crop_tif_by_bounds(
-    input_tif_path="input.tif",
-    output_tif_path="output.tif",
-    lon_min=110.347, lat_min=37.595,
-    lon_max=110.348, lat_max=37.596,
-    buffer_distance_km=2
-)
+### Submitting Issues
 
-# Example 2: Calculate flow accumulation
-from DEMAndRemoteSensingUtils import calculate_flow_accumulation
-
-calculate_flow_accumulation(
-    dem_path="dem.tif",
-    flow_accum_path="flow_accum.tif"
-)
-
-# Example 3: Merge multiple DEMs
-from DEMAndRemoteSensingUtils import merge_geo_referenced_tifs
-
-merge_geo_referenced_tifs(
-    input_dir="tiles/",
-    output_path="merged.tif",
-    overlap_strategy='mean'
-)
-```
+If you find a bug or have a feature suggestion, please submit via GitHub Issues and provide as much as possible:
+- Clear description of the issue
+- Reproduction steps (for bugs)
+- Expected behavior
+- Environment information (Python version, OS, etc.)
 
 <p align="right">(<a href="#top">back to top</a>)</p>
+
+---
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+```
+MIT License
+
+Copyright (c) 2024 Kevin Chen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 <p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+## Acknowledgments
+
+This project uses the following excellent open-source libraries and tools:
+
+- [Rasterio](https://rasterio.readthedocs.io/) - Raster data I/O
+- [GeoPandas](https://geopandas.org/) - Geospatial data processing
+- [NumPy](https://numpy.org/) - Numerical computing
+- [SciPy](https://scipy.org/) - Scientific computing
+- [WhiteboxTools](https://www.whiteboxgeo.com/manual/wbt_book/intro.html) - Geospatial analysis
+- [GDAL](https://gdal.org/) - Geospatial Data Abstraction Library
+- [PyProj](https://pyproj4.github.io/pyproj/) - Map projections and coordinate transformations
+- [Shapely](https://shapely.readthedocs.io/) - Geometric object manipulation
+
+<p align="right">(<a href="#top">back to top</a>)</p>
+
+---
+
+<div align="center">
+  <p>
+    <sub>Built with ❤️ by <a href="https://github.com/isKunner">Kevin Chen</a></sub>
+  </p>
+  <p>
+    <a href="https://github.com/isKunner/DEMAndRemoteSensingUtils">⭐ Star this Project</a>
+  </p>
+</div>
