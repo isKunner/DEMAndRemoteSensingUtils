@@ -4,15 +4,17 @@
 # @Time    : 2025/7/24 17:52
 # @Author  : Kevin
 # @Describe: 根据已有的裁剪好的tif进行重新的裁剪采样(方形)
-
+import json
 import os
 import math
 import numpy as np
 import pandas as pd
 
 import rasterio
+from numpy.lib.utils import source
 from rasterio.warp import reproject, transform_bounds, Resampling
 from rasterio.windows import from_bounds, Window
+from scipy.stats._resampling import ResamplingMethod
 
 
 def process_reference_with_sources(
@@ -179,6 +181,7 @@ def crop_source_to_reference(
         output_destination,
         output_suffix="",
         resampling_method=Resampling.nearest,
+        skip_resampling=False,
         log_csv=None
 ):
     """
@@ -206,6 +209,7 @@ def crop_source_to_reference(
                 - 一个包含对应输出文件路径的列表 (list of str)，长度必须与 reference_inputs 一致。
             - 如果 reference_inputs 是目录，则 output_destination 必须是目录路径 (str)。
         output_suffix (str, optional): 添加到自动生成的输出文件名的后缀。默认为空字符串。
+        skip_resampling (bool, optional): 是否跳过重采样步骤，仅进行范围裁剪。默认为False。
         resampling_method (rasterio.warp.Resampling, optional): 重采样方法。默认为最近邻。
     """
     # 解析输入和输出，生成最终的处理对 (ref_path, out_path)
@@ -216,6 +220,8 @@ def crop_source_to_reference(
     # --- 打开源影像 ---
     with rasterio.open(source_raster_path) as src_ds:
         print(f"已打开源影像: {os.path.basename(source_raster_path)}")
+        if skip_resampling:
+            print("注意: 已启用 skip_resampling 模式，将仅进行范围裁剪，不进行重采样。")
 
         # 获取源影像的基本元数据
         src_crs = src_ds.crs
@@ -230,7 +236,7 @@ def crop_source_to_reference(
             if not _process_single_reference_with_source_handle(
                 src_ds, ref_path, out_path,
                 src_crs, src_bounds, src_nodata, src_count, src_transform,
-                resampling_method
+                resampling_method, skip_resampling
             ):
                 print(f"处理出错: {os.path.basename(ref_path)} -> {os.path.basename(out_path)}")
                 log_content.append({
@@ -329,7 +335,7 @@ def _resolve_input_output_pairs(reference_inputs, output_destination, output_suf
 def _process_single_reference_with_source_handle(
         src_ds, reference_raster_path, output_path,
         src_crs, src_bounds, src_nodata, src_count, src_transform,
-        resampling_method
+        resampling_method, skip_resampling=False
 ):
     """处理单个参考影像文件的核心逻辑，接收已打开的源影像句柄。"""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -384,45 +390,69 @@ def _process_single_reference_with_source_handle(
             src_window_mask = src_ds.dataset_mask(window=final_window)
             mask_valid_ratio = np.sum(src_window_mask == 255) / src_window_mask.size if src_window_mask.size > 0 else 0
 
-            dst_array = np.full((src_count, ref_height, ref_width), src_nodata, dtype=src_window_data.dtype)
+            # 根据 skip_resampling 参数决定处理方式
+            if skip_resampling:
+                # 跳过重采样，直接进行范围裁剪
+                print(f"跳过重采样，仅进行范围裁剪: {os.path.basename(reference_raster_path)}")
 
-            for band_idx in range(src_count):
-                reproject(
-                    source=src_window_data[band_idx],
-                    destination=dst_array[band_idx],
-                    src_transform=src_window_transform,
-                    src_crs=src_crs,
-                    dst_transform=ref_transform,
-                    dst_crs=ref_crs,
-                    resampling=resampling_method,
-                    src_nodata=src_nodata,
-                    dst_nodata=src_nodata,
-                    src_mask=src_window_mask if mask_valid_ratio > 0 else np.nan
-                )
+                # 创建输出数组，保持源影像的分辨率和坐标系
+                dst_array = np.full((src_count, final_window.height, final_window.width),
+                                  src_nodata, dtype=src_window_data.dtype)
+                dst_array[:] = src_window_data
 
-            mid_row = ref_height // 2
-            mid_col = ref_width // 2
-            mid_region_slice = slice(max(0, mid_row - 10), min(ref_height, mid_row + 10)), \
-                slice(max(0, mid_col - 10), min(ref_width, mid_col + 10))
-            mid_region = dst_array[:, mid_region_slice[0], mid_region_slice[1]]
-            mid_total = mid_region.size
-            if ref_nodata is np.nan:
-                mid_valid = mid_total - np.sum(np.isnan(mid_region))
+                # 使用源影像的变换矩阵和坐标系
+                output_transform = src_window_transform
+                output_crs = src_crs
+                output_height, output_width = final_window.height, final_window.width
+
             else:
-                mid_valid = np.sum(mid_region != ref_nodata)
+                # 正常的重采样流程
+                dst_array = np.full((src_count, ref_height, ref_width), src_nodata, dtype=src_window_data.dtype)
 
-            if mid_valid / mid_total < 0.99:
-                print(f"警告: 输出影像 {os.path.basename(output_path)} 中间区域有效率低于99%，请检查！")
+                for band_idx in range(src_count):
+                    reproject(
+                        source=src_window_data[band_idx],
+                        destination=dst_array[band_idx],
+                        src_transform=src_window_transform,
+                        src_crs=src_crs,
+                        dst_transform=ref_transform,
+                        dst_crs=ref_crs,
+                        resampling=resampling_method,
+                        src_nodata=src_nodata,
+                        dst_nodata=src_nodata,
+                        src_mask=src_window_mask if mask_valid_ratio > 0 else np.nan
+                    )
+
+                # 使用参考影像的变换矩阵和坐标系
+                output_transform = ref_transform
+                output_crs = ref_crs
+                output_height, output_width = ref_height, ref_width
+
+            # 中间区域有效性检查（仅在重采样模式下进行）
+            if not skip_resampling:
+                mid_row = ref_height // 2
+                mid_col = ref_width // 2
+                mid_region_slice = slice(max(0, mid_row - 10), min(ref_height, mid_row + 10)), \
+                    slice(max(0, mid_col - 10), min(ref_width, mid_col + 10))
+                mid_region = dst_array[:, mid_region_slice[0], mid_region_slice[1]]
+                mid_total = mid_region.size
+                if ref_nodata is np.nan:
+                    mid_valid = mid_total - np.sum(np.isnan(mid_region))
+                else:
+                    mid_valid = np.sum(mid_region != ref_nodata)
+
+                if mid_valid / mid_total < 0.99:
+                    print(f"警告: 输出影像 {os.path.basename(output_path)} 中间区域有效率低于99%，请检查！")
 
             with rasterio.open(
                     output_path, 'w',
                     driver='GTiff',
-                    height=ref_height,
-                    width=ref_width,
+                    height=output_height,
+                    width=output_width,
                     count=src_count,
                     dtype=dst_array.dtype,
-                    crs=ref_crs,
-                    transform=ref_transform,
+                    crs=output_crs,
+                    transform=output_transform,
                     nodata=src_nodata,
                     compress='LZW'
             ) as dst:
@@ -591,16 +621,32 @@ if __name__ == '__main__':
     #
     # merge_sources_to_reference(reference_path, source_paths, output_path, dtype=np.float32)
 
-    source_file = r"C:\Users\Kevin\Documents\ResearchData\Copernicus\Loess_Plateau_Copernicus.tif"
-    input_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\WMG_1.0m_1024pixel"
-    output_dir = r"C:\Users\Kevin\Desktop\TheSotrageCapacityOfCheckDam\DepthAnything\Test\Copernicus_1.0m_1024pixel"
-    os.makedirs(output_dir, exist_ok=True)
-    print("开始批量处理目录...")
-    crop_source_to_reference(
-        source_raster_path=source_file,
-        reference_inputs=input_dir,  # 传入目录
-        output_destination=output_dir,  # 传入目录
-        output_suffix="",
-        resampling_method=Resampling.nearest
-    )
-    print("批量处理完成。")
+    crop_source_to_reference(source_raster_path=r"E:\Data\ResearchData\USA_ByState\CopernicusDEM\NH_original\Copernicus_DSM_10_N42_00_W072_00_DEM.tif",
+                             reference_inputs=r"E:\Data\ResearchData\USA_ByState\DAM\NH\0.tif",
+                             output_destination=r"E:\Data\ResearchData\USA_ByState\CopernicusDEM\NH\0.tif",
+                             skip_resampling=False,
+                             resampling_method=Resampling.cubic,)
+
+
+    # key = "DE"
+    # source_dir = rf"D:\研究文件\ResearchData\USA_ByState\CopernicusDEM\{key}_original"
+    # input_dir = rf"D:\研究文件\ResearchData\USA_ByState\GoogleRemoteSensing\{key}"
+    # output_dir = rf"D:\研究文件\ResearchData\USA_ByState\CopernicusDEM\{key}"
+    # os.makedirs(output_dir, exist_ok=True)
+    # print("开始批量处理目录...")
+    # json_path = os.path.join(source_dir, "Copernicus_DownloadInfo.json")
+    # with open(json_path, 'r', encoding='utf-8') as f:
+    #     json_data = json.load(f)
+    #     json_tent = json_data[key]
+    # for ref_file, value in json_tent.items():
+    #     for source_file, state in value.items():
+    #         print(f"处理文件: {source_file}")
+    #         crop_source_to_reference(
+    #             source_raster_path=os.path.join(source_dir, source_file+".tif"),
+    #             reference_inputs=os.path.join(input_dir, ref_file),
+    #             output_destination=output_dir,
+    #             output_suffix="",
+    #             resampling_method=Resampling.nearest,
+    #             skip_resampling=True,
+    #         )
+    # print("批量处理完成。")

@@ -4,153 +4,125 @@
 # @Time    : 2026/1/24 22:44
 # @Author  : Kevin
 # @Describe:
+# !/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+给SHP加缓冲区（14像素距离）→ 裁剪DEM → 切分
+确保黄土高原范围内的瓦片都是完整的14×14，无填充
+"""
 
 import os
+import numpy as np
+import rasterio
 import geopandas as gpd
-import time
+from rasterio.mask import mask
+from rasterio.transform import Affine
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+import multiprocessing
 
 
-def clip_points_by_boundary(points_shp_path, boundary_shp_path, output_shp_path):
+def clip_with_buffer(input_tif, shp_path, output_tif, pixel_buffer=14):
     """
-    根据边界多边形裁剪点数据
+    用SHP+缓冲区裁剪DEM
 
     Args:
-        points_shp_path (str): 点数据SHP文件路径（全球水坝数据）
-        boundary_shp_path (str): 边界多边形SHP文件路径（美国州边界）
-        output_shp_path (str): 输出SHP文件路径
-
-    Returns:
-        str: 输出文件路径
+        pixel_buffer: 缓冲的像素数（默认14）
     """
-    start_time = time.time()
-    print(f"开始处理: {os.path.basename(points_shp_path)}")
+    print(f"读取SHP: {shp_path}")
+    gdf = gpd.read_file(shp_path)
 
-    # 读取点数据（水坝数据）
-    print("读取点数据...")
-    points_gdf = gpd.read_file(points_shp_path)
-    print(f"  原始点数据包含 {len(points_gdf)} 个水坝点")
+    # 确保坐标系一致
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        gdf = gdf.to_crs(epsg=4326)
 
-    # 读取边界数据（美国州边界）
-    print("读取边界数据...")
-    boundary_gdf = gpd.read_file(boundary_shp_path)
-    print(f"  边界数据包含 {len(boundary_gdf)} 个州/区域")
+    # 读取DEM获取分辨率
+    with rasterio.open(input_tif) as src:
+        pixel_size = abs(src.transform.a)  # 通常是0.00027778度（约30米）
+        print(f"DEM分辨率: {pixel_size}度/像素")
 
-    # 检查坐标系，如果不一致则转换
-    if not points_gdf.crs.equals(boundary_gdf.crs):
-        print(f"坐标系不一致，将点数据转换为边界数据的坐标系: {boundary_gdf.crs}")
-        points_gdf = points_gdf.to_crs(boundary_gdf.crs)
+        # 计算14像素对应的地理距离（度）
+        buffer_distance = pixel_buffer * pixel_size
+        print(f"缓冲区: {pixel_buffer}像素 = {buffer_distance:.6f}度")
 
-    # 创建边界多边形的联合（union）以提高处理效率
-    print("创建边界多边形的联合...")
-    boundary_union = boundary_gdf.unary_union
+        # 给SHP加缓冲区（向外扩展14像素）
+        gdf_buffered = gdf.copy()
+        gdf_buffered['geometry'] = gdf.geometry.buffer(buffer_distance)
 
-    # 筛选位于边界内的点
-    print("筛选位于美国境内的水坝点...")
-    points_within_usa = points_gdf[points_gdf.geometry.within(boundary_union)].copy()
+        print(f"原始范围: {gdf.total_bounds}")
+        print(f"缓冲后范围: {gdf_buffered.total_bounds}")
 
-    print(f"  筛选后保留 {len(points_within_usa)} 个水坝点")
-    print(f"  移除了 {len(points_gdf) - len(points_within_usa)} 个不在美国境内的水坝点")
+    # 用缓冲后的SHP裁剪DEM
+    shapes = [geom for geom in gdf_buffered.geometry]
 
-    # 确保输出目录存在
-    output_dir = os.path.dirname(output_shp_path)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    with rasterio.open(input_tif) as src:
+        out_image, out_transform = mask(
+            src,
+            shapes,
+            crop=True,
+            all_touched=True,
+            filled=False
+        )
 
-    # 保存结果
-    print(f"保存结果到: {output_shp_path}")
-    points_within_usa.to_file(output_shp_path)
+        out_meta = src.meta.copy()
+        out_meta.update({
+            "driver": "GTiff",
+            "height": out_image.shape[1],
+            "width": out_image.shape[2],
+            "transform": out_transform,
+            "compress": "lzw",
+            "tiled": True,
+            "blockxsize": 512,
+            "blockysize": 512
+        })
 
-    # 计算处理时间
-    elapsed_time = time.time() - start_time
-    print(f"处理完成，耗时: {elapsed_time:.2f} 秒")
+        print(f"\n保存带缓冲区的裁剪结果: {output_tif}")
+        print(f"尺寸: {out_image.shape[1]} x {out_image.shape[2]}")
 
-    return output_shp_path
+        with rasterio.open(output_tif, "w", **out_meta) as dest:
+            dest.write(out_image)
+            # 复制标签
+            tags = src.tags()
+            if tags:
+                dest.update_tags(**tags)
+
+    print("✅ 缓冲区裁剪完成！")
+    return output_tif
 
 
-def clip_points_by_boundary_with_state_info(points_shp_path, boundary_shp_path, output_shp_path):
-    """
-    根据边界多边形裁剪点数据，并保留州信息
+def write_tile(args):
+    """写瓦片"""
+    tile_data, tile_transform, crs, nodata, output_dir, h_idx, w_idx = args
+    tile_name = f"{h_idx}_{w_idx}.tif"
+    tile_path = os.path.join(output_dir, tile_name)
 
-    Args:
-        points_shp_path (str): 点数据SHP文件路径（全球水坝数据）
-        boundary_shp_path (str): 边界多边形SHP文件路径（美国州边界）
-        output_shp_path (str): 输出SHP文件路径
+    if os.path.exists(tile_path):
+        return f"{h_idx}_{w_idx} 已存在", True
 
-    Returns:
-        str: 输出文件路径
-    """
-    start_time = time.time()
-    print(f"开始处理: {os.path.basename(points_shp_path)}")
-
-    # 读取点数据（水坝数据）
-    print("读取点数据...")
-    points_gdf = gpd.read_file(points_shp_path)
-    print(f"  原始点数据包含 {len(points_gdf)} 个水坝点")
-
-    # 读取边界数据（美国州边界）
-    print("读取边界数据...")
-    boundary_gdf = gpd.read_file(boundary_shp_path)
-    print(f"  边界数据包含 {len(boundary_gdf)} 个州/区域")
-
-    # 检查是否包含必要的字段
-    required_fields = ['NAME', 'REGION', 'DIVISION']
-    available_fields = [field for field in required_fields if field in boundary_gdf.columns]
-    print(f"  边界数据中可用的字段: {available_fields}")
-
-    # 检查坐标系，如果不一致则转换
-    if not points_gdf.crs.equals(boundary_gdf.crs):
-        print(f"坐标系不一致，将点数据转换为边界数据的坐标系: {boundary_gdf.crs}")
-        points_gdf = points_gdf.to_crs(boundary_gdf.crs)
-
-    # 执行空间连接，将点与边界多边形关联
-    print("执行空间连接，确定每个水坝点所属的州...")
-    joined_gdf = gpd.sjoin(points_gdf, boundary_gdf[['NAME', 'REGION', 'DIVISION', 'geometry']],
-                           how='inner', predicate='within')
-
-    print(f"  空间连接后保留 {len(joined_gdf)} 个水坝点")
-    print(f"  移除了 {len(points_gdf) - len(joined_gdf)} 个不在美国境内的水坝点")
-
-    # 统计各州的水坝数量
-    if 'NAME' in joined_gdf.columns:
-        state_counts = joined_gdf['NAME'].value_counts()
-        print("\n各州水坝数量统计（前10个州）:")
-        for state, count in state_counts.head(10).items():
-            print(f"  {state}: {count} 个水坝")
-        print(f"  总共 {len(state_counts)} 个州有水坝数据")
-
-    # 确保输出目录存在
-    output_dir = os.path.dirname(output_shp_path)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # 保存结果
-    print(f"\n保存结果到: {output_shp_path}")
-    # 移除不必要的列，如index_right
-    if 'index_right' in joined_gdf.columns:
-        joined_gdf = joined_gdf.drop(columns=['index_right'])
-
-    joined_gdf.to_file(output_shp_path)
-
-    # 计算处理时间
-    elapsed_time = time.time() - start_time
-    print(f"\n处理完成，耗时: {elapsed_time:.2f} 秒")
-
-    return output_shp_path
-
+    try:
+        with rasterio.open(
+                tile_path, 'w',
+                driver='GTiff',
+                height=tile_data.shape[0],
+                width=tile_data.shape[1],
+                count=1,
+                dtype=tile_data.dtype,
+                crs=crs,
+                transform=tile_transform,
+                nodata=nodata,
+                compress='lzw'
+        ) as dst:
+            dst.write(tile_data, 1)
+        return f"{h_idx}_{w_idx} 成功", True
+    except Exception as e:
+        return f"{h_idx}_{w_idx} 失败: {str(e)}", False
 
 if __name__ == '__main__':
-    # 输入文件路径
-    global_dams_shp = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\GeoDAR_v11_dams.shp"
-    usa_states_shp = r"C:\Users\Kevin\Documents\ResearchData\RangeOfUSA\States.shp"
+    # 路径配置
+    INPUT_TIF = r"D:\Data\ResearchData\Copernicus\20260404_CopernicusDEM.tif"
+    SHP_PATH = r"C:\Users\Kevin\Documents\ResearchData\RangeOfLoessPlateau\Range_of_Loess_Plateau.shp"
+    BUFFERED_TIF = r"D:\Data\ResearchData\Copernicus\LoessPlateau_Buffered.tif"
+    OUTPUT_DIR = r"D:\Data\ResearchData\Copernicus\CopernicusDEMPatch"
 
-    # 输出文件路径
-    output_dir = r"C:\Users\Kevin\Documents\ResearchData\GeoDAR_v10_v11\GeoDAR_v11_dams_of_USA"
-    output_shp = os.path.join(output_dir, "GeoDAR_v11_dams_USA.shp")
-
-    # 方法1: 简单裁剪（只保留点，不保留州信息）
-    # clip_points_by_boundary(global_dams_shp, usa_states_shp, output_shp)
-
-    # 方法2: 裁剪并保留州信息（推荐）
-    clip_points_by_boundary_with_state_info(global_dams_shp, usa_states_shp, output_shp)
-
-    print("\n处理完成！")
+    # 步骤1: 加缓冲区（14像素）并裁剪
+    clip_with_buffer(INPUT_TIF, SHP_PATH, BUFFERED_TIF, pixel_buffer=30)

@@ -10,7 +10,7 @@ import numpy as np
 import rasterio
 
 
-def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
+def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='linear_blend'):
     """
     自定义拼接统一坐标系TIF，支持重叠区域平均值
     """
@@ -28,6 +28,7 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
 
     if not tif_files:
         raise ValueError(f"输入文件夹 {input_dir} 未找到TIF文件")
+
     print(f"找到 {len(tif_files)} 个TIF文件，开始处理...")
 
     # 2. 读取参考文件元数据
@@ -36,6 +37,8 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
         ref_bands = ref_ds.count
         ref_dtype = ref_ds.dtypes[0]
         ref_nodata = ref_ds.nodata
+        ref_tags = ref_ds.tags()
+
         # 关键：如果源文件没有定义nodata，手动指定（根据数据类型调整）
         if ref_nodata is None:
             ref_nodata = np.nan if np.issubdtype(ref_dtype, np.floating) else 0
@@ -81,6 +84,11 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
     if overlap_strategy == 'mean':
         # 均值计算需要累加，初始化为0（避免Nodata污染计算）
         merged_data = np.zeros((ref_bands, global_height, global_width), dtype=ref_dtype)
+        count_array = np.zeros((global_height, global_width), dtype=np.uint32)
+    elif overlap_strategy == 'linear_blend':
+        # 加权策略：merged_data存加权和，count_array存权重和（都用float64）
+        merged_data = np.zeros((ref_bands, global_height, global_width), dtype=np.float64)
+        count_array = np.zeros((global_height, global_width), dtype=np.float64)
     else:
         # 其他策略仍初始化为Nodata
         merged_data = np.full(
@@ -88,7 +96,7 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
             ref_nodata,
             dtype=ref_dtype
         )
-    count_array = np.zeros((global_height, global_width), dtype=np.uint32)
+
 
     # 7. 遍历每个TIF处理数据
     for idx, ds in enumerate(src_datasets):
@@ -158,6 +166,33 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
                 target_region[valid_mask] = np.maximum(target_region[valid_mask], band_data[valid_mask])
             elif overlap_strategy == 'min':
                 target_region[valid_mask] = np.minimum(target_region[valid_mask], band_data[valid_mask])
+            elif overlap_strategy == 'linear_blend':
+                # 计算距离权重掩码（修复版）
+                y = np.arange(ds_height)[:, np.newaxis]  # (h, 1)
+                x = np.arange(ds_width)[np.newaxis, :]  # (1, w)
+
+                d_top = y
+                d_bottom = (ds_height - 1 - y)
+                d_left = x
+                d_right = (ds_width - 1 - x)
+
+                # 修复：分两步计算minimum，利用numpy广播机制
+                # 先合并垂直方向(h,1)，再合并水平方向(1,w)，最后合并两者
+                min_dist = np.minimum(
+                    np.minimum(d_top, d_bottom),  # (h, 1)
+                    np.minimum(d_left, d_right)  # (1, w)
+                )  # 结果自动广播为 (h, w)
+
+                max_dist = min(ds_height, ds_width) / 2.0
+                dist_mask = (min_dist / max_dist).clip(0, 1).astype(np.float64)
+
+                # 关键：只有有效像素才有权重
+                weights = dist_mask * valid_mask.astype(np.float64)
+
+                # 累加加权和到分子（merged_data）
+                target_region[valid_mask] += band_data[valid_mask] * weights[valid_mask]
+                # 累加权重到分母（count_array）
+                count_array[start_y:end_y, start_x:end_x] += weights
 
     # count_array = count_array // 3
 
@@ -176,6 +211,25 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
 
             merged_data[band, ~non_zero_mask] = ref_nodata
 
+
+    elif overlap_strategy == 'linear_blend':
+
+        for band in range(ref_bands):
+
+            non_zero_mask = (count_array > 0)  # 有权重的地方才有效
+
+            if np.sum(non_zero_mask) == 0:
+                continue
+
+            # 除法归一化：加权和 / 权重和
+            merged_data[band, non_zero_mask] = (
+                    merged_data[band, non_zero_mask] / count_array[non_zero_mask]
+            ).astype(ref_dtype)
+
+            merged_data[band, ~non_zero_mask] = ref_nodata
+
+
+
     # 9. 保存结果
     with rasterio.open(
             output_path,
@@ -190,6 +244,8 @@ def merge_geo_referenced_tifs(input_dir, output_path, overlap_strategy='mean'):
             nodata=ref_nodata
     ) as dst:
         dst.write(merged_data)
+        if ref_tags:
+            dst.update_tags(**ref_tags)
 
     print(f"\n拼接完成！结果已保存至: {output_path}")
 
@@ -247,23 +303,21 @@ def merge_geo_referenced_tifs_by_group(input_dir, output_prefix, n_groups=2, ove
 
 if __name__ == "__main__":
     # Test目录路径
-    test_dir = r"C:\Users\Kevin\Desktop\inference_results"
+    test_dir = r"D:\Data\ResearchData\Copernicus\20260404_CopernicusDEM"
 
     file_list = []
 
     for file in os.listdir(test_dir):
 
-
-        if file.endswith("HRDEM.tif"):
+        if file.endswith(".tif"):
 
             file_list.append(os.path.join(test_dir, file))
 
     merge_geo_referenced_tifs(
         input_dir=file_list,
-        output_path=os.path.join(test_dir, f"HRDEM.tif"),
-        overlap_strategy='mean'
+        output_path=r"D:\Data\ResearchData\Copernicus\LoessPlateau.tif",
+        overlap_strategy='linear_blend'
     )
-    print(f"拼接完成: {file}.tif")
 
 
     print("所有文件夹处理完毕！")
